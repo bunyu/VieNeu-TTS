@@ -268,6 +268,38 @@ def get_model_status_message() -> str:
         f"🎵 Codec: {current_codec} on {codec_device}{preencoded_note}{opt_info}"
     )
 
+_autoload_started = False
+
+
+def autoload_model(*load_inputs):
+    """Load the default model as soon as the page opens (VIENEU_AUTOLOAD=1, set by run_windows.bat).
+
+    The model files stay in the Hugging Face cache (HF_HOME) after the first download; what each start
+    still needs is reading them into memory, and this does it without a click on the load button.
+    """
+    global _autoload_started
+    if _autoload_started or model_loaded or not env_bool("VIENEU_AUTOLOAD", default=False):
+        return
+    _autoload_started = True
+    yield from load_model(*load_inputs)
+
+
+VOICE_SAMPLE_TEXT = "Xin chào, tôi sẽ đọc sách cho bạn nghe bằng giọng này. Chúc bạn có những phút giây thật thư giãn."
+_voice_samples: dict = {}
+
+
+def voice_sample(voice_choice):
+    """A short sentence in the chosen voice, kept for the session so a second listen is instant."""
+    if not model_loaded or tts is None:
+        raise gr.Error("Vui lòng nạp model trước!")
+    voice_id = resolve_voice_id(voice_choice) if voice_choice else None
+    key = (current_backbone, voice_id)
+    if key not in _voice_samples:
+        kwargs = {"voice": tts.get_preset_voice(voice_id)} if voice_id else {}
+        _voice_samples[key] = np.asarray(tts.infer(VOICE_SAMPLE_TEXT, **kwargs), dtype=np.float32).reshape(-1)
+    return tts.sample_rate, _voice_samples[key]
+
+
 def restore_ui_state():
     """Update UI components based on persistence"""
     global model_loaded
@@ -1973,8 +2005,9 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                 "(chèn trực tiếp vào văn bản) — riêng tính năng này vẫn **đang thử nghiệm**."
             )
 
-            btn_load = gr.Button("🔄 Tải Model", variant="primary")
-            model_status = gr.Markdown("⏳ Chưa tải model.")
+            btn_load = gr.Button("🔄 Nạp model vào bộ nhớ", variant="primary")
+            model_status = gr.Markdown("⏳ Chưa nạp model. File model chỉ tải về một lần và được lưu trên máy; "
+                                       "mỗi lần mở app chỉ cần nạp lại vào bộ nhớ (tự động khi chạy bằng run_windows.bat).")
         
         with gr.Row(elem_classes="container"):
             # --- INPUT ---
@@ -2007,6 +2040,9 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             choices=[], value=None, label="Giọng mẫu", allow_custom_value=True,
                             info="Giọng bạn lưu ở tab Voice Cloning cũng nằm trong danh sách này.",
                         )
+                        with gr.Row():
+                            btn_voice_sample = gr.Button("🔊 Nghe thử giọng này", size="sm", scale=1)
+                            voice_sample_audio = gr.Audio(label="Nghe thử", autoplay=True, interactive=False, scale=3)
                         generation_mode = gr.Radio(
                             ["Standard (Một lần)"],
                             value="Standard (Một lần)",
@@ -2120,9 +2156,25 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                                               placeholder="Để trống: tạo thư mục '<tên sách> - audio' cạnh file nguồn")
                         book_voice = gr.Dropdown(choices=[], value=None, label="Giọng đọc", allow_custom_value=True,
                                                  info="Giọng mẫu hoặc giọng bạn đã lưu ở tab Voice Cloning.")
-                        book_format = gr.Radio(["mp3", "wav", "flac"], value="mp3", label="Định dạng")
+                        with gr.Row():
+                            btn_book_sample = gr.Button("🔊 Nghe thử giọng này", size="sm", scale=1)
+                            book_sample_audio = gr.Audio(label="Nghe thử", autoplay=True, interactive=False, scale=3)
+                        book_format = gr.Radio(["mp3", "opus", "wav", "flac"], value="mp3", label="Định dạng",
+                                               info="opus: file nhỏ, nên dùng khi chép sang app Android. Cạnh mỗi file audio có một file .sync.json "
+                                                    "(văn bản kèm mốc thời gian); chép cả hai sang điện thoại để app vừa phát vừa dò theo chữ.")
+                        book_chapters = gr.Number(value=1, minimum=1, maximum=1000, precision=0, label="📑 Số chương trong mỗi file audio",
+                                                  info="1 = mỗi chương một file. Ví dụ 5: sách được chia thành các file, mỗi file 5 chương (001-005, 006-010, …).")
                         book_pause = gr.Slider(0.0, 3.0, value=0.35, step=0.05, label="⏸️ Ngắt nghỉ giữa các đoạn (giây)",
                                                info="Chèn thẻ như [0.8] hoặc [2] vào văn bản để dừng đúng số giây đó (tối đa 10; [10][10] là 20 giây).")
+                        with gr.Accordion("⏸️ Ngắt nghỉ theo từng dấu câu (như app Android)", open=False):
+                            gr.Markdown("Để **0** là giữ nhịp tự nhiên của giọng đọc. Đặt số giây để dừng **đúng** chừng đó sau dấu câu "
+                                        "(trong ngoặc là mức tự nhiên để tham khảo). Dấu nào được đặt thì văn bản được tách tại đó nên tạo audio chậm hơn một chút.")
+                            from apps.book_batch import PAUSE_MARKS as _PAUSE_MARKS
+                            _mark_names = {".": "Dấu chấm", ",": "Dấu phẩy", "?": "Dấu hỏi", "!": "Dấu chấm than", ":": "Dấu hai chấm", ";": "Dấu chấm phẩy", "…": "Dấu ba chấm"}
+                            book_mark_keys = list(_PAUSE_MARKS)
+                            with gr.Row():
+                                book_marks = [gr.Slider(0.0, 5.0, value=0.0, step=0.1, label=f"{_mark_names[m]} {m} (tự nhiên ≈ {_PAUSE_MARKS[m]} s)", min_width=220)
+                                              for m in book_mark_keys]
                         with gr.Row():
                             btn_book_list = gr.Button("🔎 Xem danh sách phần", variant="secondary")
                             btn_book_run = gr.Button("📚 Tạo audio cho cả sách", variant="primary", interactive=False)
@@ -2641,7 +2693,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
 
         btn_book_list.click(_book_list, inputs=[book_source, book_upload], outputs=[book_log])
 
-        def _book_run(path_text, upload, out_dir, voice_choice, fmt, paragraph_pause=0.35):
+        def _book_run(path_text, upload, out_dir, voice_choice, fmt, paragraph_pause=0.35, chapters_per_file=1, *mark_seconds):
             from apps.book_batch import convert_book, default_output_dir
             if not model_loaded or tts is None:
                 yield "⚠️ Vui lòng tải model trước!"
@@ -2654,6 +2706,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             _STOP_EVENT.clear()
             # A dropped file lives in Gradio's temp folder; write next to it only if asked.
             target = (out_dir or "").strip().strip('"') or (None if path_text else str(Path.home() / "Music" / f"{Path(source).stem} - audio"))
+            rules = {m: float(s) for m, s in zip(book_mark_keys, mark_seconds) if s and float(s) > 0}
             log: list[str] = []
             done = threading.Event()
             error: list[BaseException] = []
@@ -2661,7 +2714,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             def work():
                 try:
                     convert_book(tts, source, target, resolve_voice_id(voice_choice) if voice_choice else None,
-                                 fmt, stop=_STOP_EVENT, report=log.append, paragraph_pause=float(paragraph_pause))
+                                 fmt, stop=_STOP_EVENT, report=log.append, paragraph_pause=float(paragraph_pause),
+                                 chapters_per_file=int(chapters_per_file or 1), pause_rules=rules)
                 except BaseException as e:  # noqa: BLE001
                     error.append(e)
                 finally:
@@ -2675,8 +2729,10 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                 log.append(f"❌ Lỗi: {error[0]}")
             yield "\n".join(log[-200:])
 
-        btn_book_run.click(_book_run, inputs=[book_source, book_upload, book_out, book_voice, book_format, book_pause],
+        btn_book_run.click(_book_run, inputs=[book_source, book_upload, book_out, book_voice, book_format, book_pause, book_chapters, *book_marks],
                            outputs=[book_log])
+        btn_book_sample.click(voice_sample, inputs=[book_voice], outputs=[book_sample_audio])
+        btn_voice_sample.click(voice_sample, inputs=[voice_select], outputs=[voice_sample_audio])
         btn_book_stop.click(lambda: _STOP_EVENT.set(), outputs=None)
 
         def _srt_run(srt_path, voice_choice, keep_timing, fmt, use_batch_flag, batch_size):
@@ -2706,6 +2762,12 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
         demo.load(
             fn=restore_ui_state,
             outputs=[model_status, btn_generate, btn_generate_conv, btn_stop]
+        ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd]).then(
+            fn=autoload_model,
+            inputs=[backbone_select, codec_select, device_choice, use_lmdeploy_cb,
+                    custom_backbone_model_id, custom_backbone_base_model, custom_backbone_hf_token],
+            outputs=[model_status, btn_generate, btn_generate_conv, btn_load, btn_stop, voice_select,
+                     tab_custom, conv_tab, *speaker_voice_dds]
         ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd])
 
 def main():

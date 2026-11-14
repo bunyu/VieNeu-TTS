@@ -11,6 +11,10 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
+import io.github.bunyu.reader.data.Clip
 import io.github.bunyu.reader.data.Library
 import io.github.bunyu.reader.data.OpenBook
 import io.github.bunyu.reader.data.ReaderSettings
@@ -54,6 +58,8 @@ data class NarrationState(
     val skipped: Int = 0,
     /** Seconds of speech the phone generates per second of work; null until a passage was generated. */
     val speed: Float? = null,
+    /** Set while playback holds back after running dry: how many passages are ready again, out of [Narration.HOLD_PIECES]. */
+    val buffered: Int? = null,
     val error: String? = null,
     val finished: Boolean = false,
 )
@@ -70,6 +76,8 @@ class Narration(private val context: Context, private val library: Library, priv
     val state: StateFlow<NarrationState> = mutable.asStateFlow()
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
+        // Audio brought from a PC is played in stretches cut out of long files, so a jump must land on the exact time, in MP3 too.
+        .setMediaSourceFactory(DefaultMediaSourceFactory(context, DefaultExtractorsFactory().setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)))
         .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
         .setHandleAudioBecomingNoisy(true)
         .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -91,6 +99,11 @@ class Narration(private val context: Context, private val library: Library, priv
     /** Parts of a piece the listener was waiting for, played before the whole piece was ready: book piece index and file. */
     private val earlyDir = File(context.cacheDir, "early-parts")
     private val earlyFiles = ArrayDeque<Pair<Int, File>>()
+    /**
+     * Playback ran dry on a phone that generates slower than it plays: the player item to resume from once a
+     * few passages are ready again, so the listener waits once instead of after every passage. -1 when not holding.
+     */
+    private var holdFrom = -1
 
     init {
         player.addListener(object : Player.Listener {
@@ -108,9 +121,12 @@ class Narration(private val context: Context, private val library: Library, priv
                 if (playWhenReady) ReaderService.start(context)
             }
             override fun onPlayerError(error: PlaybackException) {
-                // A damaged cached piece: delete it so it is generated again, and carry on.
-                player.currentMediaItem?.localConfiguration?.uri?.path?.let { File(it).delete() }
+                val file = player.currentMediaItem?.localConfiguration?.uri?.path?.let(::File)
                 mutable.value = mutable.value.copy(error = "playback")
+                // Audio the reader brought in is never deleted, and playing it again would only fail again.
+                if (file != null && book?.pieces?.any { it.clip?.file == file } == true) { player.playWhenReady = false; return }
+                // A damaged cached piece: delete it so it is generated again, and carry on.
+                file?.delete()
                 reload(position, play = mutable.value.playing)
             }
         })
@@ -261,6 +277,10 @@ class Narration(private val context: Context, private val library: Library, priv
             return
         }
         mutable.value = mutable.value.copy(waiting = true)
+        if (player.playWhenReady && holdFrom < 0 && (renderer.speed.value ?: 1f) < 1f) {
+            holdFrom = player.mediaItemCount
+            mutable.value = mutable.value.copy(buffered = 0)
+        }
         wake.trySend(Unit)
     }
 
@@ -282,6 +302,8 @@ class Narration(private val context: Context, private val library: Library, priv
         queuedUntil = position - 1
         player.stop(); player.clearMediaItems()
         earlyFiles.clear()
+        holdFrom = -1
+        mutable.value = mutable.value.copy(buffered = null)
         earlyDir.listFiles()?.forEach { it.delete() }
         player.playWhenReady = play
         renderJob?.cancel()
@@ -299,36 +321,45 @@ class Narration(private val context: Context, private val library: Library, priv
     }
 
     /** Queues every contiguous generated piece after [queuedUntil]. */
-    private fun queueReady(voice: ResolvedVoice) {
+    private fun queueReady(voice: ResolvedVoice?) {
         val opened = book ?: return
         val folder = library.audioDir(opened.book.id)
         val startCount = player.mediaItemCount
         while (queuedUntil + 1 < opened.pieces.size && queuedUntil + 1 - position < 400) {
             val piece = opened.pieces[queuedUntil + 1]
-            val file = renderer.file(folder, voice, piece)
-            if (!file.isFile) break
-            player.addMediaItem(item(opened, piece.index, file))
+            val clip = piece.clip
+            val file = if (clip != null) clip.file else voice?.let { renderer.file(folder, it, piece) }?.takeIf { it.isFile } ?: break
+            player.addMediaItem(item(opened, piece.index, file, clip))
             queuedUntil++
         }
         if (player.mediaItemCount > startCount) resume(startCount)
         publish()
     }
 
-    private fun item(opened: OpenBook, index: Int, file: File): MediaItem {
+    private fun item(opened: OpenBook, index: Int, file: File, clip: Clip? = null): MediaItem {
         val meta = MediaMetadata.Builder().setTitle(opened.book.chapters[opened.pieces[index].chapter].title).setArtist(opened.book.title).build()
-        return MediaItem.Builder().setMediaId(index.toString()).setUri(Uri.fromFile(file)).setMediaMetadata(meta).build()
+        val item = MediaItem.Builder().setMediaId(index.toString()).setUri(Uri.fromFile(file)).setMediaMetadata(meta)
+        if (clip != null) item.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(clip.startMs).setEndPositionMs(maxOf(clip.endMs, clip.startMs + 1)).build())
+        return item.build()
     }
 
     /** Gets the player going again after items were added from [firstNew] on. */
     private fun resume(firstNew: Int) {
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
-        if (player.playbackState == Player.STATE_ENDED) player.seekTo(firstNew, 0)
+        if (player.playbackState != Player.STATE_ENDED) return
+        if (holdFrom < 0) { player.seekTo(firstNew, 0); return }
+        val ready = queuedUntil - position
+        if (ready < HOLD_PIECES && queuedUntil < (book?.pieces?.size ?: 0) - 1) { mutable.value = mutable.value.copy(buffered = ready.coerceAtLeast(0)); return }
+        player.seekTo(holdFrom, 0)
+        holdFrom = -1
+        mutable.value = mutable.value.copy(buffered = null)
     }
 
     private suspend fun renderLoop() {
         val opened = book ?: return
         val folder = library.audioDir(opened.book.id)
-        val resolved = ensureVoice() ?: return
+        // A book that came with all its audio needs no voice; a piece without audio is read by the model as usual.
+        val resolved = if (opened.pieces.all { it.clip != null }) null else ensureVoice() ?: return
         queueReady(resolved)
         if (mutable.value.preparingAll) mutable.value = mutable.value.copy(preparedTotal = countReady(opened, folder, resolved, mutable.value.preparedFrom))
         while (true) {
@@ -338,8 +369,8 @@ class Narration(private val context: Context, private val library: Library, priv
             }
             val ahead = if (mutable.value.preparingAll) opened.pieces.size else settings.value.prepareAhead
             val limit = (position + ahead).coerceAtMost(opened.pieces.size - 1)
-            val target = (queuedUntil + 1..limit).firstOrNull { !renderer.file(folder, resolved, opened.pieces[it]).isFile }
-            if (target == null) {
+            val target = (queuedUntil + 1..limit).firstOrNull { resolved != null && opened.pieces[it].clip == null && !renderer.file(folder, resolved, opened.pieces[it]).isFile }
+            if (target == null || resolved == null) {
                 mutable.value = mutable.value.copy(rendering = false)
                 if (mutable.value.preparingAll && limit >= opened.pieces.size - 1) mutable.value = mutable.value.copy(preparingAll = false)
                 wake.receive(); queueReady(resolved); continue
@@ -347,7 +378,7 @@ class Narration(private val context: Context, private val library: Library, priv
             mutable.value = mutable.value.copy(rendering = true)
             var played = 0
             // The listener is on the last ready piece, or already waiting: play this one part by part as it is generated.
-            val early = if (target == queuedUntil + 1 && queuedUntil <= position) EarlyParts(earlyDir) { part ->
+            val early = if (target == queuedUntil + 1 && queuedUntil <= position && holdFrom < 0) EarlyParts(earlyDir) { part ->
                 withContext(Dispatchers.Main) {
                     val count = player.mediaItemCount
                     player.addMediaItem(item(opened, target, part))
@@ -381,8 +412,13 @@ class Narration(private val context: Context, private val library: Library, priv
         file.copyTo(renderer.file(folder, voice, opened.pieces[index]), overwrite = true)
     }
 
-    private suspend fun countReady(opened: OpenBook, folder: File, voice: ResolvedVoice, from: Int) = withContext(Dispatchers.IO) {
-        opened.pieces.drop(from).count { renderer.file(folder, voice, it).isFile }
+    private suspend fun countReady(opened: OpenBook, folder: File, voice: ResolvedVoice?, from: Int) = withContext(Dispatchers.IO) {
+        opened.pieces.drop(from).count { it.clip != null || (voice != null && renderer.file(folder, voice, it).isFile) }
+    }
+
+    companion object {
+        /** Passages to have ready before playback resumes after running dry. */
+        const val HOLD_PIECES = 3
     }
 
     /** Forgets the open book, e.g. when it is deleted. */

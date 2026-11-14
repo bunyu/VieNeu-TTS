@@ -147,4 +147,15 @@
     <string name="reading_progress">Chương %1$d/%2$d · %3$d%%</string>
     <string name="voice_sample">Nghe thử</string>
     <string name="voice_sample_failed">Không tạo được đoạn nghe thử.</string>
+    <string name="player_hide">Thu gọn trình phát</string>
+    <string name="player_show">Hiện đầy đủ trình phát</string>
+    <string name="status_buffering">Đang chuẩn bị trước: %1$d/%2$d đoạn</string>
+    <string name="fast_suggest">Tạo giọng chậm hơn tốc độ nghe. Bật tạo giọng nhanh hơn</string>
+    <string name="prepared_add">Thêm audio làm sẵn trên máy tính</string>
+    <string name="prepared_link">Lấy audio làm sẵn từ đường link</string>
+    <string name="prepared_link_hint">Mỗi dòng một link: từng file audio và file .sync.json nằm cạnh nó, hoặc một file .zip chứa tất cả. File trên Google Drive phải được chia sẻ cho “Bất kỳ ai có đường liên kết”.</string>
+    <string name="prepared_done">Đã thêm %1$d file audio.</string>
+    <string name="prepared_none">Chưa thêm được gì. Mỗi file audio cần file .sync.json được tạo cạnh nó: hãy chọn cả hai.</string>
+    <string name="prepared_failed">Không lấy được audio. Hãy kiểm tra link và quyền chia sẻ của file.</string>
+    <string name="download">Tải về</string>
 </resources>

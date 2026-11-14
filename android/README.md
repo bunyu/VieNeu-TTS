@@ -23,6 +23,15 @@ GitHub Actions builds the APK on every change under `android/`
 
 ## What it does
 
+- **Reading.** A book opens as a plain reader: paragraphs in one continuous scroll,
+  bars that hide on a tap, light / sepia / dark / black pages, text size, typeface,
+  line spacing, margins, justification, brightness and bookmarks. The headphone button
+  brings in the player.
+- **Audio made on a PC.** `apps/book_batch.py` (the "📚 Sách → audio" tab of the Windows
+  app) writes a `.sync.json` beside every audio file. Add the audio files with their
+  sync files from the library menu (from storage, Google Drive in the picker, or a
+  link) and the app plays them while following the text; use the `opus` format.
+
 - **Library.** Import EPUB 2/3 or plain text. EPUB chapters follow the reading order
   (spine) and are named by their first heading; the title and author come from the
   package document. A plain-text file is split on lines such as "Chương 12"; UTF-8,
@@ -33,7 +42,8 @@ GitHub Actions builds the APK on every change under `android/`
   revision in `src/main/assets/vieneu-release.json` and checked against its SHA-256;
   a file that differs is discarded. After the download the app reads offline.
 - **Voices.** The model's own Vietnamese voices (northern and southern, male and
-  female), or **Clone a voice**: pick a short, clean recording of one person speaking
+  female), twenty more enrolled from the voices of VieNeu-TTS v3 Turbo
+  (`app/scripts/make_extra_voices.py`), each with a sample to hear, or **Clone a voice**: pick a short, clean recording of one person speaking
   (5 to 10 seconds is best, at least 2; only the first 30 are heard) and confirm you
   may use the voice. A VoiceStudio voice export (`.ovsvoice`, or the older
   `.omnivoice`) works too; its reference clip is used. Cloning downloads three more graphs (about

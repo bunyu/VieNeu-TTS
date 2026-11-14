@@ -48,8 +48,7 @@ class VieNeu(private val context: Context) {
     private suspend fun load(): Loaded = mutex.withLock {
         loaded ?: withContext(Dispatchers.IO) {
             check(ready) { "model not installed" }
-            // Big cores only: more threads land on the efficiency cores and slow every step down.
-            val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
+            val threads = BigCores.count()
             // A model or native library that cannot load fails every passage the same way: report it once instead of skipping the book.
             try { Loaded(NanoEngine(assets.directory, threads), SeaG2p(assets.file(DICTIONARY)), NanoPresets.read(assets.file(PRESETS)) + extraVoices()) }
             catch (e: Throwable) { throw VoiceUnavailable("runtime_failed") }

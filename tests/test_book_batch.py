@@ -114,3 +114,49 @@ def test_tags_become_silence(tmp_path):
     out = convert_book(tts, src, tmp_path / "out", fmt="wav", report=lambda _: None, paragraph_pause=0.0)
     assert tts.calls == ["một", "hai"]
     assert sf.info(str(out[0])).frames == 800 * 2 + 2 * 8000
+
+
+def test_marks_with_a_rule_cut_the_paragraph():
+    from apps.book_batch import split_marks
+    rules = {".": 0.6, ",": 0.2}
+    text = 'GS. Nam đến TP. Huế, giá 3.5 triệu. "Thật sao?" Cô gật đầu...'
+    assert split_marks(text, rules) == [("GS. Nam đến TP. Huế,", 0.2), ("giá 3.5 triệu.", 0.6), ('"Thật sao?" Cô gật đầu...', None)]
+    assert split_marks(text, {}) == [(text, None)]
+    assert split_marks("Hết rồi... Thật đấy.", {"…": 1.0}) == [("Hết rồi...", 1.0), ("Thật đấy.", None)]
+
+
+def test_chapters_share_a_file(tmp_path):
+    book = tmp_path / "book.epub"
+    make_epub(book, [(f"Chương {i}", f"Nội dung {i}.") for i in range(5, 0, -1)])  # the spine reverses them
+    tts = FakeTts()
+    files = convert_book(tts, book, tmp_path / "out", fmt="wav", report=lambda _: None, chapters_per_file=2, paragraph_pause=0)
+    assert [f.name for f in files] == ["001-002 - Chương 1.wav", "003-004 - Chương 3.wav", "005 - Chương 5.wav"]
+    # Each chapter is a heading and a paragraph, 0.1 s each; the chapter pause sits between two chapters.
+    assert abs(sf.info(str(files[0])).duration - (0.4 + 1.4)) < 0.01
+    assert abs(sf.info(str(files[2])).duration - 0.2) < 0.01
+    # A second run finds every file done.
+    assert len(convert_book(tts, book, tmp_path / "out", fmt="wav", report=lambda _: None, chapters_per_file=2)) == 3 and len(tts.calls) == 10
+
+
+def test_a_changed_mark_stops_for_exactly_that_long(tmp_path):
+    source = tmp_path / "a.txt"
+    source.write_text("Một, hai. Ba.\nBốn.", encoding="utf-8")
+    tts = FakeTts()
+    files = convert_book(tts, source, tmp_path / "out", fmt="wav", report=lambda _: None, paragraph_pause=0.5, pause_rules={".": 1.0})
+    assert tts.calls == ["Một, hai.", "Ba.", "Bốn."]
+    # Three clips of 0.1 s; 1 s after the first full stop, and each paragraph end takes the longer of its two pauses.
+    assert abs(sf.info(str(files[0])).duration - (0.3 + 1.0 + 1.0 + 1.0)) < 0.01
+
+
+def test_sync_file_times_every_paragraph(tmp_path):
+    import json
+    book = tmp_path / "book.epub"
+    make_epub(book, [("Hai", "Đoạn cuối."), ("Một", "Đoạn đầu.")])
+    files = convert_book(FakeTts(), book, tmp_path / "out", fmt="wav", report=lambda _: None, chapters_per_file=2, paragraph_pause=0.5)
+    sync = json.loads((tmp_path / "out" / (files[0].name + ".sync.json")).read_text(encoding="utf-8"))
+    assert (sync["format"], sync["book"], sync["index"], sync["of"], sync["audio"]) == ("vieneu-sync", "Sách thử", 1, 1, files[0].name)
+    assert [c["title"] for c in sync["chapters"]] == ["Một", "Hai"]
+    # 0.1 s of speech and 0.5 s of pause per paragraph; the second chapter starts after the 1.4 s chapter pause.
+    assert sync["chapters"][0]["segments"] == [[0.0, 0.6, "Một"], [0.6, 1.2, "Đoạn đầu."]]
+    assert sync["chapters"][1]["segments"] == [[2.6, 3.2, "Hai"], [3.2, 3.8, "Đoạn cuối."]]
+    assert abs(sf.info(str(files[0])).duration - sync["seconds"]) < 0.001

@@ -52,7 +52,9 @@ class Paragraph(val pieces: List<BookPiece>) {
 }
 
 /** One spoken piece of a book; [index] runs through the whole book so playback crosses chapters seamlessly. */
-data class BookPiece(val index: Int, val chapter: Int, val text: String, val pause: Pause)
+data class BookPiece(val index: Int, val chapter: Int, val text: String, val pause: Pause,
+    /** Set when the piece came with its audio from a PC; such a piece is played from there and never generated. */
+    val clip: Clip? = null)
 class OpenBook(val book: StoredBook, val pieces: List<BookPiece>) {
     val chapterStarts: List<Int> = book.chapters.indices.map { c -> pieces.indexOfFirst { it.chapter == c }.let { if (it < 0) pieces.size else it } }
     fun piecesOf(chapter: Int) = pieces.filter { it.chapter == chapter }
@@ -125,7 +127,33 @@ class Library(private val context: Context) {
 
     suspend fun open(id: String): OpenBook = withContext(Dispatchers.IO) {
         val book = json.decodeFromString<StoredBook>(File(dir(id), "book.json").readText())
-        OpenBook(book, pieces(book))
+        val prepared = File(dir(id), PreparedAudio.FILE).takeIf { it.isFile }?.let { json.decodeFromString(PreparedBook.serializer(), it.readText()) }
+        OpenBook(book, prepared?.pieces(File(dir(id), PreparedAudio.FOLDER)) ?: pieces(book))
+    }
+
+    /**
+     * Adds audio made on a PC: the picked audio files with the `.sync.json` file of each, or zip files
+     * holding them. They become a new book, or more parts of the book they belong to.
+     */
+    suspend fun importPrepared(uris: List<Uri>): PreparedAudio.Result = staged { staging ->
+        uris.forEachIndexed { n, uri ->
+            val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+            (context.contentResolver.openInputStream(uri) ?: error("unreadable")).use { input ->
+                File(staging, File(name ?: "file-$n").name).outputStream().use { input.copyTo(it, 262_144) }
+            }
+        }
+    }
+
+    /** The same from links, one file each: audio files and sync files, or a zip of them. */
+    suspend fun importPreparedLinks(links: List<String>): PreparedAudio.Result = staged { staging -> links.forEach { PreparedAudio.download(it, staging) } }
+
+    private suspend fun staged(fill: (File) -> Unit): PreparedAudio.Result = withContext(Dispatchers.IO) {
+        // Inside the books folder so the audio can be moved, not copied a second time.
+        val staging = File(root, ".staging-" + UUID.randomUUID()).apply { mkdirs() }
+        try {
+            fill(staging)
+            mutex.withLock { PreparedAudio.import(root, staging) }
+        } finally { staging.deleteRecursively(); refresh() }
     }
 
     private fun pieces(book: StoredBook): List<BookPiece> {

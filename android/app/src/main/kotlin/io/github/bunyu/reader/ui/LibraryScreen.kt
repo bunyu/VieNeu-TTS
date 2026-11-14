@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import io.github.bunyu.reader.R
 import io.github.bunyu.reader.ReaderApp
 import io.github.bunyu.reader.data.BookSummary
+import io.github.bunyu.reader.data.PreparedAudio
+import androidx.compose.material3.OutlinedTextField
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,11 +64,45 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
     val books by app.library.books.collectAsState()
     val narration by app.narration.state.collectAsState()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(onImport) }
+    val scope = rememberCoroutineScope()
+    var menu by remember { mutableStateOf(false) }
+    var linking by remember { mutableStateOf(false) }
+    var fetching by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    /** Audio made on a PC: runs the import and says what came of it. */
+    fun prepared(import: suspend () -> PreparedAudio.Result) {
+        fetching = true
+        scope.launch {
+            val result = runCatching { import() }
+            fetching = false
+            val done = result.getOrNull()
+            notice = when {
+                done == null -> context.getString(R.string.prepared_failed)
+                done.parts == 0 -> context.getString(R.string.prepared_none)
+                else -> context.getString(R.string.prepared_done, done.parts)
+            }
+            if (done != null && done.parts > 0 && done.books.size == 1) onOpen(done.books.single())
+        }
+    }
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) prepared { app.library.importPrepared(uris) }
+    }
     fun choose() = pick.launch(arrayOf("application/epub+zip", "text/plain", "application/octet-stream"))
 
     Scaffold(
         modifier = modifier,
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_library)) }) },
+        topBar = {
+            TopAppBar(title = { Text(stringResource(R.string.tab_library)) }, actions = {
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.more)) }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.prepared_add)) }, onClick = { menu = false; pickAudio.launch(arrayOf("*/*")) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.prepared_link)) }, onClick = { menu = false; linking = true })
+                    }
+                }
+            })
+        },
         floatingActionButton = {
             if (books.isNotEmpty()) ExtendedFloatingActionButton(onClick = ::choose, icon = { Icon(Icons.Filled.Add, null) }, text = { Text(stringResource(R.string.add_book)) })
         },
@@ -86,7 +122,7 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            if (importing) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (importing || fetching) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (books.isEmpty()) {
                 Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(painterResource(R.drawable.ic_notification), null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
@@ -100,6 +136,26 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
             }
         }
     }
+    if (linking) LinkDialog(onDismiss = { linking = false }) { links -> linking = false; prepared { app.library.importPreparedLinks(links) } }
+    notice?.let { message ->
+        AlertDialog(onDismissRequest = { notice = null }, text = { Text(message) }, confirmButton = { TextButton({ notice = null }) { Text(stringResource(R.string.close)) } })
+    }
+}
+
+@Composable
+private fun LinkDialog(onDismiss: () -> Unit, onFetch: (List<String>) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val links = text.lines().map { it.trim() }.filter { it.startsWith("https://") || it.startsWith("http://") }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.prepared_link)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.prepared_link_hint), style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(text, { text = it }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), minLines = 3, maxLines = 8, placeholder = { Text("https://…") })
+            }
+        },
+        confirmButton = { TextButton({ onFetch(links) }, enabled = links.isNotEmpty()) { Text(stringResource(R.string.download)) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
 }
 
 @Composable

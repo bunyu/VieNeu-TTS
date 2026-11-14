@@ -7,5 +7,7 @@ if not defined HF_HOME set HF_HOME=%~dp0.hf-home
 set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
 set VIENEU_OPEN_BROWSER=1
+rem Load the default model as soon as the page opens, so there is no button to press on every start.
+if not defined VIENEU_AUTOLOAD set VIENEU_AUTOLOAD=1
 .venv\Scripts\python.exe -m apps.gradio_main
 pause

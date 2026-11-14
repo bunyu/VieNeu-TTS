@@ -40,6 +40,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -136,6 +138,8 @@ private fun ReaderContent(bookId: String, settings: Settings, onBack: () -> Unit
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<String?>(null) }
     var bars by rememberSaveable { mutableStateOf(true) }
+    /** The player folded down to one row, to leave the page to the text while listening. */
+    var compact by rememberSaveable { mutableStateOf(false) }
     var bookmarks by remember { mutableStateOf(emptyList<Bookmark>()) }
     LaunchedEffect(bookId) { narration.open(bookId); bookmarks = app.library.bookmarks(bookId) }
     val book = if (state.bookId == bookId) narration.current() else null
@@ -232,7 +236,19 @@ private fun ReaderContent(bookId: String, settings: Settings, onBack: () -> Unit
             // The app draws edge to edge, so the controls must stay above the system navigation bar.
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
                 state.error?.let { SetupBanner(it, onSetup) }
-                Status(state.waiting || state.playing && state.readyAhead == 0, state.readyAhead, state.skipped, state.speed)
+                if (compact) Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { narration.toggle() }) {
+                        Icon(painterResource(if (state.playing) R.drawable.ic_pause else R.drawable.ic_play), stringResource(if (state.playing) R.string.pause else R.string.play))
+                    }
+                    LinearProgressIndicator(progress = { (state.piece + 1f) / state.totalPieces.coerceAtLeast(1) }, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                    IconButton(onClick = { compact = false }) { Icon(Icons.Filled.KeyboardArrowUp, stringResource(R.string.player_show)) }
+                } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { Status(state.waiting || state.playing && state.readyAhead == 0, state.readyAhead, state.skipped, state.speed, state.buffered) }
+                    IconButton(onClick = { compact = true }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.player_hide)) }
+                }
+                // Slower than listening: reading will stall, and half the steps is the one setting that helps.
+                if ((state.speed ?: 1f) < 1f && !settings.fast) TextButton(onClick = { app.settings.update { it.copy(fast = true) } }) { Text(stringResource(R.string.fast_suggest)) }
                 if (state.totalPieces > 0) LinearProgressIndicator(progress = { (state.piece + 1f) / state.totalPieces }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { narration.previous() }) { Icon(painterResource(R.drawable.ic_previous), stringResource(R.string.previous)) }
@@ -249,6 +265,7 @@ private fun ReaderContent(bookId: String, settings: Settings, onBack: () -> Unit
                     FilterChip(selected = state.preparingAll, onClick = { narration.prepareAll(!state.preparingAll) },
                         label = { Text(if (state.preparingAll) stringResource(R.string.preparing_all, state.preparedTotal, state.totalPieces - state.preparedFrom, state.preparedFromChapter + 1) else stringResource(R.string.prepare_all)) },
                         leadingIcon = { Icon(painterResource(R.drawable.ic_prepare), null, Modifier.size(18.dp)) })
+                }
                 }
             }
         }
@@ -399,8 +416,9 @@ private fun Toggle(label: Int, on: Boolean, onChange: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun Status(waiting: Boolean, readyAhead: Int, skipped: Int, speed: Float?) {
+private fun Status(waiting: Boolean, readyAhead: Int, skipped: Int, speed: Float?, buffered: Int?) {
     val text = when {
+        buffered != null -> stringResource(R.string.status_buffering, buffered, io.github.bunyu.reader.playback.Narration.HOLD_PIECES)
         waiting -> stringResource(R.string.status_waiting)
         readyAhead > 0 -> stringResource(R.string.status_ready, readyAhead)
         else -> stringResource(R.string.status_idle)

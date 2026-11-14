@@ -147,4 +147,15 @@
     <string name="reading_progress">Chapter %1$d/%2$d · %3$d%%</string>
     <string name="voice_sample">Hear a sample</string>
     <string name="voice_sample_failed">The sample could not be made.</string>
+    <string name="player_hide">Fold the player</string>
+    <string name="player_show">Show the whole player</string>
+    <string name="status_buffering">Getting ahead: %1$d of %2$d passages ready</string>
+    <string name="fast_suggest">The voice is slower than listening. Turn on faster generation</string>
+    <string name="prepared_add">Add audio made on a PC</string>
+    <string name="prepared_link">Get PC audio from a link</string>
+    <string name="prepared_link_hint">One link per line: each audio file and the .sync.json file made beside it, or one .zip holding them. A Google Drive file must be shared with “Anyone with the link”.</string>
+    <string name="prepared_done">%1$d audio files added.</string>
+    <string name="prepared_none">Nothing was added. Each audio file needs the .sync.json file that was made beside it: pick both.</string>
+    <string name="prepared_failed">The audio could not be fetched. Check the link, and that the file is shared with anyone who has it.</string>
+    <string name="download">Download</string>
 </resources>

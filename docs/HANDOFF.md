@@ -1,8 +1,70 @@
 # Handoff: VieNeu Reader (Android) and the Windows GPU app
 
-State as of 2026-11-14, `main` at `b9b4286` on `bunyu/VieNeu-TTS` (a fork of
-`pnnbao97/VieNeu-TTS`, Apache-2.0). Start a new feature from `main` on a branch of
-its own; push to `main` only once the work is finished and tested.
+State as of 2026-11-15: `main` at `b9b4286` on `bunyu/VieNeu-TTS` (a fork of
+`pnnbao97/VieNeu-TTS`, Apache-2.0), and the work described under "Branch
+`claude/reader-fast-start`" below on that branch, pushed but not merged. Start a new
+feature from `main` on a branch of its own; push to `main` only once the work is
+finished and tested.
+
+## Branch `claude/reader-fast-start` (2026-11-15)
+
+Built and unit-tested on the PC; **nothing on this branch has been run on the phone
+yet** except the speed readout (the Xiaomi 14T showed 1.8–2× listening speed in normal
+mode and 3–3.5× in fast mode, so v3 Nano keeps ahead of the listener there).
+
+Reader (Android):
+
+- **Plain reader first.** The book screen opens without the player (`Settings.listening`,
+  the headphone button in the top bar). With listening off nothing is generated
+  (`Narration.reload` starts the render loop only when listening, playing or preparing
+  the whole book) and the place follows the scroll (`Narration.readAt`). Text is shown
+  in paragraphs (`OpenBook.paragraphs`), one continuous scroll through the book; bars
+  hide on a tap; themes, type, margins, brightness and keep-awake are in the "Aa" sheet
+  (`AppearanceSheet`); bookmarks live in `books/<id>/bookmarks.json`.
+- **Player.** Folds to one row (the arrow beside the status line). A piece the listener
+  is waiting for is played part by part as it is generated (`EarlyParts` in `Renderer`,
+  files in `cacheDir/early-parts`), its first part cut to the opening sentence
+  (`Chunker.calls`). When playback runs dry on a phone slower than listening, it holds
+  until `Narration.HOLD_PIECES` are ready (`holdFrom`). Below 1× the player offers fast
+  mode. Threads come from the count of fast cores (`BigCores`).
+- **Voices.** A play button per preset speaks a sample (`VieNeu.sample`, cached). The
+  20 v3 Turbo voices Nano lacks are packed as `assets/voices_extra.json`: each Turbo
+  voice spoke a passage on the PC and Nano enrolled that speech
+  (`android/app/scripts/make_extra_voices.py`; the clips are in
+  `D:\work\audio\extra-voices`, `NN.wav` from Turbo and `NN-nano.wav` from the enrolled
+  voice). They are Nano clones of those voices, not the Turbo model. Nobody has listened
+  to them yet.
+- **Audio made on a PC.** Library menu → "Add audio made on a PC" (pick the audio files
+  and the `.sync.json` beside each, or a zip of them; Google Drive shows in the picker)
+  or "from a link" (`PreparedAudio.download`; Drive and Dropbox share links are
+  rewritten, tested only against a local server). Such a book is `prepared.json` plus
+  `prepared/NNNN.ext`; its pieces are the paragraphs of the sync files, each a `Clip`
+  played as a clipped ExoPlayer item, so highlight, seek, speed and the sleep timer work
+  as for generated audio. Parts can be added later and in any order.
+
+Windows app:
+
+- `run_windows.bat` sets `VIENEU_AUTOLOAD=1`: the default model loads when the page
+  opens (`autoload_model`). The model files were always kept in `.hf-home`; what each
+  start needed was the click on the load button.
+- "🔊 Nghe thử giọng này" beside the voice lists (`voice_sample`).
+- Book tab: chapters per file (`chapters_per_file`, files named `001-005 - …`), a pause
+  per punctuation mark (`pause_rules`, `split_marks`; 0 keeps the natural flow), format
+  `opus`, and a `.sync.json` beside every audio file with the time of each paragraph.
+  Each paragraph is now spoken by itself, so the paragraph pause really falls between
+  paragraphs. Audio made earlier has no sync file; delete a file to have it made again.
+
+Not done:
+
+- **v3 Turbo on the phone** (asked for: a choice between Nano and Turbo). Not started.
+  It needs a Kotlin port of `src/vieneu/_v3_turbo_engine/onnx_runtime_lite.py`
+  (prefill / decode-step / acoustic graphs with a KV cache, the heads in an `.npz`,
+  sampling, the MOSS codec at 48 kHz), a download manifest (the fp32 backbone alone is
+  415 MB; with heads and codec about 520 MB) and real-model tests. From the desktop
+  ratio (Turbo 0.55–0.62 against Nano 0.22) the 14T would make Turbo speech at about
+  0.7× listening speed, so it would be for "Prepare whole book", not live listening.
+  Audio made on the PC and imported gives the same voice today.
+- Smaller or quantised Nano graphs and the XNNPACK backend were not tried.
 
 ## What exists
 
@@ -122,8 +184,9 @@ Additional settings → Developer options), `adb install -r` works and logs can 
 ## Open items and ideas
 
 - Exercise on the phone: the recorder (permission, level meter, auto-stop at 45 s),
-  rename, the pause dialog, prepare-from-chapter. None of these has been tried on a
-  device yet.
+  rename, the pause dialog, prepare-from-chapter, and everything on the branch above
+  (first of all: play-as-generated at a seek, the end of a book, and a book imported
+  with PC audio, where the joins between clipped stretches need a listen).
 - `[n]` tags are removed from speech but still shown in the reader's text.
 - Release build: R8 shrinking and arm64-only would take the APK from about 120 MB to
   an estimated 40–45 MB (not built yet; most of the size is ONNX Runtime for two ABIs
