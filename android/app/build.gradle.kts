@@ -37,6 +37,8 @@ val buildG2p by tasks.registering(Exec::class) {
     environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
     val cargo = if (org.gradle.internal.os.OperatingSystem.current().isWindows) "cargo.exe" else "cargo"
     commandLine(cargo, "ndk", "--platform", "29", "-t", "arm64-v8a", "-t", "x86_64", "-o", out.get().asFile.absolutePath, "build", "--release", "--locked")
+    // sea-g2p is linked into libreader_g2p; cargo-ndk also copies the crate's own C library, which nothing loads.
+    doLast { delete(fileTree(out) { include("**/libsea_g2p_rs.so") }) }
 }
 // The app shows its own licence and the credits for the model and phonemiser.
 val bundleLicences by tasks.registering(Copy::class) {
