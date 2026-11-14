@@ -29,4 +29,26 @@ class ChunkerTest {
         assertTrue(parts.all { it.length <= 120 })
         assertTrue(parts.dropLast(1).all { it.endsWith(",") })
     }
+
+    @Test fun quickStartSpeaksTheOpeningSentenceFirst() {
+        val text = "Trời đã tối hẳn khi anh về đến nhà. Cô vẫn ngồi chờ bên cửa sổ, tay cầm cuốn sách cũ. Không ai nói với ai lời nào."
+        val usual = Chunker.calls(text, maxChars = 140)
+        assertEquals(Chunker.split(text, maxChars = 140, minChars = 40), usual)
+        val quick = Chunker.calls(text, maxChars = 140, quickStart = true)
+        assertEquals("Trời đã tối hẳn khi anh về đến nhà.", quick.first().text)
+        assertEquals(Pause.SENTENCE, quick.first().pause)
+        assertTrue(quick.all { it.text.length <= 140 })
+        // The same words in the same order, only cut earlier.
+        assertEquals(text, quick.joinToString(" ") { it.text })
+    }
+
+    @Test fun quickStartJoinsVeryShortOpeningSentences() {
+        val quick = Chunker.calls("Ừ. Thế à? Anh không biết chuyện ấy đâu. Mọi người đều đã về từ chiều hôm qua, chỉ còn mình tôi ở lại trông nhà.", maxChars = 140, quickStart = true)
+        assertEquals("Ừ. Thế à? Anh không biết chuyện ấy đâu.", quick.first().text)
+    }
+
+    @Test fun quickStartLeavesASingleSentenceAlone() {
+        val text = "Chỉ có một câu ngắn thôi."
+        assertEquals(Chunker.split(text, maxChars = 140, minChars = 40), Chunker.calls(text, maxChars = 140, quickStart = true))
+    }
 }

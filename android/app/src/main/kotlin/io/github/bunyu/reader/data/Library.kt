@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
@@ -25,11 +26,52 @@ import java.util.UUID
 @Serializable data class BookSummary(val id: String, val title: String, val author: String? = null, val addedAt: Long, val chapterTitles: List<String>,
     val chapter: Int = 0, val piece: Int = 0, val totalPieces: Int = 0, val openedAt: Long = 0)
 
+/** A place the reader marked: the piece it starts at and the first words there, for the list. */
+@Serializable data class Bookmark(val piece: Int, val chapter: Int, val text: String, val addedAt: Long)
+
+/** One paragraph as shown on the page: the consecutive pieces up to a paragraph or chapter pause. */
+class Paragraph(val pieces: List<BookPiece>) {
+    val first get() = pieces.first().index
+    val chapter get() = pieces.first().chapter
+    val text: String by lazy { pieces.joinToString(" ") { it.text } }
+    /** Where piece [index] sits in [text], or null when it belongs to another paragraph. */
+    fun range(index: Int): IntRange? {
+        var at = 0
+        for (piece in pieces) {
+            if (piece.index == index) return at until at + piece.text.length
+            at += piece.text.length + 1
+        }
+        return null
+    }
+    /** The piece at character [offset] of [text]. */
+    fun pieceAt(offset: Int): BookPiece {
+        var end = 0
+        for (piece in pieces) { end += piece.text.length + 1; if (offset < end) return piece }
+        return pieces.last()
+    }
+}
+
 /** One spoken piece of a book; [index] runs through the whole book so playback crosses chapters seamlessly. */
 data class BookPiece(val index: Int, val chapter: Int, val text: String, val pause: Pause)
 class OpenBook(val book: StoredBook, val pieces: List<BookPiece>) {
     val chapterStarts: List<Int> = book.chapters.indices.map { c -> pieces.indexOfFirst { it.chapter == c }.let { if (it < 0) pieces.size else it } }
     fun piecesOf(chapter: Int) = pieces.filter { it.chapter == chapter }
+    /** The book as paragraphs for the page; a chapter always starts a new one. */
+    val paragraphs: List<Paragraph> by lazy {
+        val result = mutableListOf<Paragraph>()
+        var current = mutableListOf<BookPiece>()
+        for (piece in pieces) {
+            if (current.isNotEmpty() && current.last().chapter != piece.chapter) { result += Paragraph(current); current = mutableListOf() }
+            current += piece
+            if (piece.pause != Pause.SENTENCE) { result += Paragraph(current); current = mutableListOf() }
+        }
+        if (current.isNotEmpty()) result += Paragraph(current)
+        result
+    }
+    /** For each piece index, the index of its paragraph. */
+    val paragraphOf: IntArray by lazy {
+        IntArray(pieces.size).also { map -> paragraphs.forEachIndexed { p, paragraph -> for (piece in paragraph.pieces) map[piece.index] = p } }
+    }
 }
 
 /** Books live only in app-private storage. The original file is parsed once on import and kept as text. */
@@ -104,6 +146,13 @@ class Library(private val context: Context) {
             atomic(file, json.encodeToString(BookSummary.serializer(), current.copy(chapter = chapter, piece = piece, openedAt = System.currentTimeMillis())))
             state.value = state.value.map { if (it.id == id) current.copy(chapter = chapter, piece = piece, openedAt = System.currentTimeMillis()) else it }
         }
+    }
+
+    suspend fun bookmarks(id: String): List<Bookmark> = withContext(Dispatchers.IO) {
+        runCatching { json.decodeFromString(ListSerializer(Bookmark.serializer()), File(dir(id), "bookmarks.json").readText()) }.getOrDefault(emptyList())
+    }
+    suspend fun saveBookmarks(id: String, bookmarks: List<Bookmark>) = withContext(Dispatchers.IO) {
+        mutex.withLock { atomic(File(dir(id), "bookmarks.json"), json.encodeToString(ListSerializer(Bookmark.serializer()), bookmarks)) }
     }
 
     suspend fun delete(id: String) = withContext(Dispatchers.IO) { dir(id).deleteRecursively(); refresh() }

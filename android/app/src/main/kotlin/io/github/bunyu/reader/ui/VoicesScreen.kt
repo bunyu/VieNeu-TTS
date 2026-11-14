@@ -25,6 +25,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -89,11 +91,23 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
     var busy by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<io.github.bunyu.reader.voice.ReaderVoice?>(null) }
+    /** The preset whose sample is being generated. */
+    var sampling by remember { mutableStateOf<String?>(null) }
     val player = remember { mutableStateOf<MediaPlayer?>(null) }
     DisposableEffect(Unit) { onDispose { player.value?.release() } }
     fun play(file: File?) {
         player.value?.release(); player.value = null
         if (file != null) player.value = runCatching { MediaPlayer().apply { setDataSource(file.path); prepare(); start() } }.getOrNull()
+    }
+    fun sample(preset: NanoPreset) {
+        if (sampling != null) return
+        play(null); problem = null
+        sampling = preset.name
+        scope.launch {
+            val file = runCatching { app.vieneu.sample(preset) }.getOrNull()
+            sampling = null
+            if (file != null) play(file) else problem = R.string.voice_sample_failed
+        }
     }
     fun discard(clip: File) { clip.parentFile?.takeIf { it.name.startsWith("voice-clone-") }?.deleteRecursively() }
 
@@ -201,10 +215,12 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                     val selected = settings.voice == choice || (cloned.none { VoiceChoice.Cloned(it.id) == settings.voice } && list.none { VoiceChoice.Preset(it.name) == settings.voice } && preset === list.first())
                     Row(Modifier.fillMaxWidth().clickable { app.settings.update { it.copy(voice = choice) } }, verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected, { app.settings.update { it.copy(voice = choice) } })
-                        Column {
+                        Column(Modifier.weight(1f)) {
                             Text(preset.name)
                             if (preset.description.isNotBlank()) Text(preset.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        if (sampling == preset.name) CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
+                        else IconButton({ sample(preset) }, enabled = sampling == null) { Icon(painterResource(R.drawable.ic_play), stringResource(R.string.voice_sample)) }
                     }
                 }
             }

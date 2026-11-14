@@ -52,6 +52,8 @@ data class NarrationState(
     val sleepAt: Long? = null,
     val sleepAtChapterEnd: Boolean = false,
     val skipped: Int = 0,
+    /** Seconds of speech the phone generates per second of work; null until a passage was generated. */
+    val speed: Float? = null,
     val error: String? = null,
     val finished: Boolean = false,
 )
@@ -86,6 +88,9 @@ class Narration(private val context: Context, private val library: Library, priv
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var renderJob: Job? = null
     private var sleepChapter = -1
+    /** Parts of a piece the listener was waiting for, played before the whole piece was ready: book piece index and file. */
+    private val earlyDir = File(context.cacheDir, "early-parts")
+    private val earlyFiles = ArrayDeque<Pair<Int, File>>()
 
     init {
         player.addListener(object : Player.Listener {
@@ -115,6 +120,15 @@ class Narration(private val context: Context, private val library: Library, priv
             }
         }
         scope.launch { settings.flow.collect { applyAudio(it) } }
+        // With listening hidden the book is only read: nothing plays and no audio is prepared (unless the whole book was asked for).
+        scope.launch {
+            settings.flow.map { it.listening }.distinctUntilChanged().collect { on ->
+                if (book == null) return@collect
+                if (on) reload(position, play = false)
+                else { player.playWhenReady = false; if (!mutable.value.preparingAll) renderJob?.cancel() }
+            }
+        }
+        scope.launch { renderer.speed.collect { mutable.value = mutable.value.copy(speed = it) } }
     }
 
     private fun applyAudio(s: Settings) {
@@ -142,7 +156,7 @@ class Narration(private val context: Context, private val library: Library, priv
             summary != null -> summary.piece.coerceIn(0, (opened.pieces.size - 1).coerceAtLeast(0))
             else -> 0
         }
-        mutable.value = NarrationState(bookId = bookId, title = opened.book.title, totalPieces = opened.pieces.size)
+        mutable.value = NarrationState(bookId = bookId, title = opened.book.title, totalPieces = opened.pieces.size, speed = renderer.speed.value)
         reload(start, play = false)
     }
 
@@ -151,6 +165,7 @@ class Narration(private val context: Context, private val library: Library, priv
     fun play() {
         if (book == null) return
         mutable.value = mutable.value.copy(error = null, finished = false)
+        if (renderJob?.isActive != true) reload(position, play = true)
         player.playWhenReady = true
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
         if (mutable.value.waiting) wake.trySend(Unit)
@@ -161,6 +176,13 @@ class Narration(private val context: Context, private val library: Library, priv
 
     fun seekPiece(index: Int) { reload(index, play = player.playWhenReady) }
     fun seekChapter(chapter: Int) { book?.let { reload(it.chapterStarts.getOrElse(chapter) { 0 }, play = player.playWhenReady) } }
+    /** The reader scrolled to [index] while only reading: remember the place, so listening would start there. */
+    fun readAt(index: Int) {
+        val opened = book ?: return
+        if (settings.value.listening || player.playWhenReady || index == position || index !in opened.pieces.indices) return
+        reload(index, play = false)
+        scope.launch { library.savePosition(opened.book.id, opened.pieces[index].chapter, index) }
+    }
     fun next() = seekPiece((position + 1).coerceAtMost((book?.pieces?.size ?: 1) - 1))
     fun previous() = seekPiece((position - 1).coerceAtLeast(0))
 
@@ -172,7 +194,10 @@ class Narration(private val context: Context, private val library: Library, priv
         mutable.value = mutable.value.copy(preparingAll = on, preparedFrom = from, preparedFromChapter = chapter,
             preparedTotal = 0)
         recount = on
-        if (on) { ReaderService.start(context); wake.trySend(Unit) }
+        if (on) {
+            ReaderService.start(context)
+            if (renderJob?.isActive == true) wake.trySend(Unit) else reload(position, play = player.playWhenReady)
+        }
     }
 
     fun sleepAfter(minutes: Int?) {
@@ -221,6 +246,8 @@ class Narration(private val context: Context, private val library: Library, priv
         // Drop pieces already heard so the player's list stays short on long books.
         val currentItem = player.currentMediaItemIndex
         if (currentItem > 3) player.removeMediaItems(0, currentItem - 3)
+        // The three items kept behind the current one belong to the last three pieces at most.
+        while (earlyFiles.isNotEmpty() && earlyFiles.first().first < index - 4) earlyFiles.removeFirst().second.delete()
         publish()
         scope.launch { library.savePosition(opened.book.id, piece.chapter, index) }
         wake.trySend(Unit)
@@ -254,9 +281,11 @@ class Narration(private val context: Context, private val library: Library, priv
         position = index.coerceIn(0, (opened.pieces.size - 1).coerceAtLeast(0))
         queuedUntil = position - 1
         player.stop(); player.clearMediaItems()
+        earlyFiles.clear()
+        earlyDir.listFiles()?.forEach { it.delete() }
         player.playWhenReady = play
         renderJob?.cancel()
-        renderJob = scope.launch { renderLoop() }
+        renderJob = if (play || settings.value.listening || mutable.value.preparingAll) scope.launch { renderLoop() } else null
         publish()
     }
 
@@ -278,15 +307,22 @@ class Narration(private val context: Context, private val library: Library, priv
             val piece = opened.pieces[queuedUntil + 1]
             val file = renderer.file(folder, voice, piece)
             if (!file.isFile) break
-            val meta = MediaMetadata.Builder().setTitle(opened.book.chapters[piece.chapter].title).setArtist(opened.book.title).build()
-            player.addMediaItem(MediaItem.Builder().setMediaId(piece.index.toString()).setUri(Uri.fromFile(file)).setMediaMetadata(meta).build())
+            player.addMediaItem(item(opened, piece.index, file))
             queuedUntil++
         }
-        if (player.mediaItemCount > startCount) {
-            if (player.playbackState == Player.STATE_IDLE) player.prepare()
-            if (player.playbackState == Player.STATE_ENDED) { player.seekTo(startCount, 0); }
-        }
+        if (player.mediaItemCount > startCount) resume(startCount)
         publish()
+    }
+
+    private fun item(opened: OpenBook, index: Int, file: File): MediaItem {
+        val meta = MediaMetadata.Builder().setTitle(opened.book.chapters[opened.pieces[index].chapter].title).setArtist(opened.book.title).build()
+        return MediaItem.Builder().setMediaId(index.toString()).setUri(Uri.fromFile(file)).setMediaMetadata(meta).build()
+    }
+
+    /** Gets the player going again after items were added from [firstNew] on. */
+    private fun resume(firstNew: Int) {
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        if (player.playbackState == Player.STATE_ENDED) player.seekTo(firstNew, 0)
     }
 
     private suspend fun renderLoop() {
@@ -309,8 +345,19 @@ class Narration(private val context: Context, private val library: Library, priv
                 wake.receive(); queueReady(resolved); continue
             }
             mutable.value = mutable.value.copy(rendering = true)
+            var played = 0
+            // The listener is on the last ready piece, or already waiting: play this one part by part as it is generated.
+            val early = if (target == queuedUntil + 1 && queuedUntil <= position) EarlyParts(earlyDir) { part ->
+                withContext(Dispatchers.Main) {
+                    val count = player.mediaItemCount
+                    player.addMediaItem(item(opened, target, part))
+                    earlyFiles.addLast(target to part)
+                    played++
+                    resume(count)
+                }
+            } else null
             try {
-                renderer.render(folder, resolved, opened.pieces[target])
+                renderer.render(folder, resolved, opened.pieces[target], early)
             } catch (e: CancellationException) { throw e }
             catch (e: VoiceUnavailable) {
                 mutable.value = mutable.value.copy(error = e.reason, rendering = false); player.playWhenReady = false; return
@@ -319,6 +366,11 @@ class Narration(private val context: Context, private val library: Library, priv
                 mutable.value = mutable.value.copy(skipped = mutable.value.skipped + 1)
             }
             if (mutable.value.preparingAll && target >= mutable.value.preparedFrom) mutable.value = mutable.value.copy(preparedTotal = mutable.value.preparedTotal + 1)
+            if (played > 0) {
+                // Its parts are in the player already, so the whole piece must not be queued a second time.
+                queuedUntil = target
+                if (player.playbackState == Player.STATE_ENDED) caughtUp()
+            }
             queueReady(resolved)
         }
     }

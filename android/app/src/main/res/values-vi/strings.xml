@@ -44,6 +44,7 @@
     <string name="status_ready">Đã sẵn sàng %1$d đoạn phía trước</string>
     <string name="status_idle">Nhấn phát để bắt đầu đọc</string>
     <string name="status_skipped">Bỏ qua %1$d đoạn</string>
+    <string name="status_speed">Tạo giọng: %1$.1f× tốc độ nghe</string>
     <string name="status_problem">Có lỗi khi đọc.</string>
     <string name="status_preparing">Đang chuẩn bị %1$d/%2$d đoạn, từ chương %3$d</string>
     <string name="notification_channel">Đang đọc sách</string>
@@ -121,4 +122,29 @@
     <string name="pause_tags">Nghỉ ở một chỗ riêng: gõ [0.8] hay [2] vào văn bản (tối đa [10]; ghép [10][10] để nghỉ 20 giây).</string>
     <string name="pause_reset">Đặt mặc định</string>
     <string name="pause_done">Xong</string>
+    <string name="listen">Nghe</string>
+    <string name="listen_hide">Ẩn trình phát</string>
+    <string name="appearance">Chữ và màu</string>
+    <string name="theme">Màu nền</string>
+    <string name="theme_auto">Tự động</string>
+    <string name="theme_light">Sáng</string>
+    <string name="theme_sepia">Nâu giấy</string>
+    <string name="theme_dark">Tối</string>
+    <string name="theme_black">Đen</string>
+    <string name="font_size">Cỡ chữ: %1$d</string>
+    <string name="font_serif">Có chân</string>
+    <string name="font_sans">Không chân</string>
+    <string name="line_spacing">Giãn dòng: %1$.1f</string>
+    <string name="margins">Lề: %1$d</string>
+    <string name="justify">Căn đều hai bên</string>
+    <string name="brightness">Độ sáng</string>
+    <string name="brightness_phone">Theo điện thoại</string>
+    <string name="keep_screen_on">Giữ màn hình luôn sáng</string>
+    <string name="bookmark_add">Thêm dấu trang</string>
+    <string name="bookmark_remove">Bỏ dấu trang</string>
+    <string name="bookmarks">Dấu trang</string>
+    <string name="bookmarks_empty">Chưa có dấu trang. Chạm biểu tượng dấu trang ở trên để đánh dấu chỗ này.</string>
+    <string name="reading_progress">Chương %1$d/%2$d · %3$d%%</string>
+    <string name="voice_sample">Nghe thử</string>
+    <string name="voice_sample_failed">Không tạo được đoạn nghe thử.</string>
 </resources>

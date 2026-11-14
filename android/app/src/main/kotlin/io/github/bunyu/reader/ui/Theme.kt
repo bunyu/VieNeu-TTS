@@ -1,7 +1,9 @@
 package io.github.bunyu.reader.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import io.github.bunyu.reader.data.ReadingTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -23,6 +25,24 @@ private val Dark = darkColorScheme(
     background = Color(0xFF17120E), onBackground = Color(0xFFEDE0D4), surface = Color(0xFF17120E), onSurface = Color(0xFFEDE0D4),
     surfaceVariant = Color(0xFF3A2F28), onSurfaceVariant = Color(0xFFD8C2B6), surfaceContainer = Color(0xFF231C17),
 )
+
+/** Colours of the book screen for the reading theme the user chose. */
+@Composable
+fun readingColors(theme: ReadingTheme): ColorScheme = when (theme) {
+    ReadingTheme.AUTO -> if (isSystemInDarkTheme()) Dark else Light
+    ReadingTheme.LIGHT -> Light.copy(background = Color(0xFFFDFDFB), surface = Color(0xFFFDFDFB), onBackground = Color(0xFF1C1B1A), onSurface = Color(0xFF1C1B1A))
+    ReadingTheme.SEPIA -> Light.copy(background = Color(0xFFF1E2C6), surface = Color(0xFFF1E2C6), onBackground = Color(0xFF4A3622), onSurface = Color(0xFF4A3622),
+        surfaceVariant = Color(0xFFE6D3B1), surfaceContainer = Color(0xFFEAD9B9))
+    ReadingTheme.DARK -> Dark
+    ReadingTheme.BLACK -> Dark.copy(background = Color.Black, surface = Color.Black, onBackground = Color(0xFFB8B0A8), onSurface = Color(0xFFB8B0A8),
+        surfaceContainer = Color(0xFF121212))
+}
+
+fun ReadingTheme.isDark(systemDark: Boolean) = when (this) {
+    ReadingTheme.AUTO -> systemDark
+    ReadingTheme.DARK, ReadingTheme.BLACK -> true
+    else -> false
+}
 
 @Composable
 fun ReaderTheme(content: @Composable () -> Unit) {

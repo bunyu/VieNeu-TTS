@@ -44,6 +44,7 @@
     <string name="status_ready">%1$d passages ready ahead</string>
     <string name="status_idle">Press play to start reading</string>
     <string name="status_skipped">%1$d passages skipped</string>
+    <string name="status_speed">Voice made at %1$.1f× listening speed</string>
     <string name="status_problem">Something went wrong while reading.</string>
     <string name="status_preparing">Preparing %1$d of %2$d passages, from chapter %3$d</string>
     <string name="notification_channel">Reading aloud</string>
@@ -121,4 +122,29 @@
     <string name="pause_tags">Tip: a tag like [0.8] or [2] in the text pauses that many seconds (at most 10; [10][10] makes 20 s).</string>
     <string name="pause_reset">Reset to defaults</string>
     <string name="pause_done">Done</string>
+    <string name="listen">Listen</string>
+    <string name="listen_hide">Hide the player</string>
+    <string name="appearance">Text and colours</string>
+    <string name="theme">Colours</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_sepia">Sepia</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_black">Black</string>
+    <string name="font_size">Text size: %1$d</string>
+    <string name="font_serif">Serif</string>
+    <string name="font_sans">Sans-serif</string>
+    <string name="line_spacing">Line spacing: %1$.1f</string>
+    <string name="margins">Margins: %1$d</string>
+    <string name="justify">Justify text</string>
+    <string name="brightness">Brightness</string>
+    <string name="brightness_phone">Same as the phone</string>
+    <string name="keep_screen_on">Keep the screen on</string>
+    <string name="bookmark_add">Add bookmark</string>
+    <string name="bookmark_remove">Remove bookmark</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="bookmarks_empty">No bookmarks yet. Tap the bookmark at the top to mark this place.</string>
+    <string name="reading_progress">Chapter %1$d/%2$d · %3$d%%</string>
+    <string name="voice_sample">Hear a sample</string>
+    <string name="voice_sample_failed">The sample could not be made.</string>
 </resources>

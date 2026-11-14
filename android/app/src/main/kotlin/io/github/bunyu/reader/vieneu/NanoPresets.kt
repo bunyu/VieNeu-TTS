@@ -17,9 +17,14 @@ class NanoPresets(val voices: List<NanoPreset>, val defaultName: String?) {
     val default: NanoPreset? get() = voices.firstOrNull { it.name == defaultName } ?: voices.firstOrNull()
     operator fun get(name: String) = voices.firstOrNull { it.name == name }
 
+    /** These voices followed by those of [more] whose names are new. */
+    operator fun plus(more: NanoPresets) = NanoPresets(voices + more.voices.filter { extra -> voices.none { it.name == extra.name } }, defaultName)
+
     companion object {
-        fun read(file: File): NanoPresets {
-            val root = Json.parseToJsonElement(file.readText()).jsonObject
+        fun read(file: File): NanoPresets = parse(file.readText())
+
+        fun parse(text: String): NanoPresets {
+            val root = Json.parseToJsonElement(text).jsonObject
             val voices = (root["presets"] as? JsonObject).orEmpty().mapNotNull { (name, value) ->
                 runCatching {
                     val entry = value.jsonObject

@@ -38,6 +38,27 @@ object Chunker {
         return pieces
     }
 
+    /**
+     * The model calls for one spoken stretch of a piece. With [quickStart] the first call is only the opening
+     * sentences (at least [quickChars] characters), so a listener who is waiting hears the first words sooner.
+     */
+    fun calls(spoken: String, maxChars: Int, minChars: Int = 40, quickStart: Boolean = false, quickChars: Int = 30): List<Piece> {
+        val whole = split(spoken, maxChars, minChars)
+        val text = spoken.trim()
+        if (!quickStart || whole.isEmpty() || '\n' in text) return whole
+        val sentences = sentences(text)
+        var head = ""
+        var used = 0
+        for (sentence in sentences) {
+            head = if (head.isEmpty()) sentence else "$head $sentence"
+            used++
+            if (head.length >= quickChars) break
+        }
+        // No gain when the opening is the whole stretch, or as long as the usual first call.
+        if (used == sentences.size || head.length > maxChars || head.length >= whole.first().text.length) return whole
+        return listOf(Piece(head, Pause.SENTENCE)) + split(sentences.drop(used).joinToString(" "), maxChars, minChars)
+    }
+
     internal fun sentences(paragraph: String): List<String> {
         val result = mutableListOf<String>()
         var start = 0

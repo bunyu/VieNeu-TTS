@@ -41,6 +41,9 @@ class ResolvedVoice(val choice: VoiceChoice, val voice: NanoVoice, val rules: Vi
 
 class VoiceUnavailable(val reason: String) : Exception(reason)
 
+/** Where the parts of a piece go while it is still being generated: files in [folder], each announced through [ready]. */
+class EarlyParts(val folder: File, val ready: suspend (File) -> Unit)
+
 /** Turns one book piece into a short, normalized, compressed audio file in the book's audio folder. */
 class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
     suspend fun resolve(settings: Settings): ResolvedVoice {
@@ -65,13 +68,29 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
 
     fun file(folder: File, voice: ResolvedVoice, piece: BookPiece) = File(folder, voice.key(piece) + ".m4a")
 
-    suspend fun render(folder: File, voice: ResolvedVoice, piece: BookPiece): File = withContext(Dispatchers.Default) {
+    /** Seconds of speech generated per second of work, or null before the first passage. */
+    val speed get() = vieneu.speed
+
+    /**
+     * Generates [piece] into the book's audio folder. With [early], each part is also handed over as its own
+     * file the moment it is spoken, and the first part is kept short, so a waiting listener hears the start
+     * of the piece while the rest is still being generated.
+     */
+    suspend fun render(folder: File, voice: ResolvedVoice, piece: BookPiece, early: EarlyParts? = null): File = withContext(Dispatchers.Default) {
         val target = file(folder, voice, piece)
         if (target.isFile) return@withContext target
         folder.mkdirs()
         val rate = NanoEngine.SAMPLE_RATE
         val context = coroutineContext
         val polished = ArrayList<FloatArray>()
+        suspend fun done(samples: FloatArray) {
+            polished += samples
+            if (early == null || samples.isEmpty()) return
+            early.folder.mkdirs()
+            val part = File(early.folder, UUID.randomUUID().toString() + ".m4a")
+            AacWriter.write(LocalAudio(samples, rate), part)
+            early.ready(part)
+        }
         // Exact pauses split the piece first: after marks whose pause the user set, and at [n] tags.
         val segments = PauseText.segments(piece.text, voice.pauses)
         var call = 0
@@ -80,12 +99,13 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
             val after = if (last) endPause(piece.pause, segment.pauseMillis, voice.pauses) else segment.pauseMillis ?: Pause.SENTENCE.millis
             val spoken = voice.rules.normalize(segment.text)
             // The model reads at most about fifteen seconds in one go, so a long stretch is spoken in parts.
-            val parts = if (spoken.none { it.isLetterOrDigit() }) emptyList() else Chunker.split(spoken, maxChars = NanoEngine.MAX_CHARACTERS, minChars = 40)
-            if (parts.isEmpty() && segment.pauseMillis != null) polished += FloatArray((rate.toLong() * after / 1000).toInt())
+            val parts = if (spoken.none { it.isLetterOrDigit() }) emptyList()
+                else Chunker.calls(spoken, maxChars = NanoEngine.MAX_CHARACTERS, minChars = 40, quickStart = early != null && call == 0)
+            if (parts.isEmpty() && segment.pauseMillis != null) done(FloatArray((rate.toLong() * after / 1000).toInt()))
             parts.forEachIndexed { index, part ->
                 context.ensureActive()
                 val samples = vieneu.speak(part.text, voice.voice, voice.fast, voice.seed(piece, call++)) { !context.isActive }
-                polished += AudioPolish.finish(samples, rate, if (index == parts.lastIndex) after else part.pause.millis)
+                done(AudioPolish.finish(samples, rate, if (index == parts.lastIndex) after else part.pause.millis))
             }
         }
         val joined = FloatArray(polished.sumOf { it.size }).also { out -> var at = 0; for (p in polished) { p.copyInto(out, at); at += p.size } }
