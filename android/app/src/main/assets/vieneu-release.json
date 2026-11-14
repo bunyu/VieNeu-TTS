@@ -81,6 +81,13 @@
       "size": 10778145,
       "sha256": "6746906bfe857969a2b1b6e9091f1d4a19d9f04af4e187844021272dad4dcd3a",
       "group": "clone"
+    },
+    {
+      "name": "denoiser.onnx",
+      "url": "https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Nano/resolve/aba295eb96a6fa6003ebe417cc1f2802a7adc1dc/denoiser.onnx",
+      "size": 42661414,
+      "sha256": "b7621953291cfe05e695a9c0ff4255aa2f93239fc17c26627e18b7b6b8f72f0b",
+      "group": "clone"
     }
   ]
 }

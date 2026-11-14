@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Only while the user records a voice to clone; the recording stays on the phone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application android:name=".ReaderApp" android:label="@string/app_name"
         android:allowBackup="false" android:supportsRtl="true" android:theme="@style/ReaderTheme"
         android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher">

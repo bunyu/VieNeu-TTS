@@ -1,5 +1,6 @@
 package io.github.bunyu.reader
 
+import io.github.bunyu.reader.vieneu.NanoDenoiser
 import io.github.bunyu.reader.vieneu.NanoEngine
 import io.github.bunyu.reader.vieneu.NanoEnroller
 import io.github.bunyu.reader.vieneu.NanoOptions
@@ -69,6 +70,29 @@ class NanoModelTest {
                 println("speaker similarity to the source voice %.3f, closest other voice %.3f".format(similarity, other))
                 assertTrue("speaker vector is far from its source: $similarity", similarity > 0.5 && similarity > other)
                 save("cloned-from-preset.wav", timed("cloned voice", engine, cloned, NanoOptions()))
+                if (File(directory, NanoDenoiser.FILE).isFile) {
+                    // A phone recording in a room: the same speech with hiss and mains hum at about 15 dB below it.
+                    val random = java.util.Random(7)
+                    val level = rms(standard)
+                    val noisy = FloatArray(standard.size) { i ->
+                        standard[i] + (level / 5.6 * (random.nextGaussian() + 2 * kotlin.math.sin(2 * Math.PI * 50 * i / NanoEngine.SAMPLE_RATE)) / 1.7).toFloat()
+                    }
+                    NanoEnroller(directory).use { enroller ->
+                        val start = System.nanoTime()
+                        val cleaned = enroller.enroll(noisy, NanoEngine.SAMPLE_RATE)
+                        val took = (System.nanoTime() - start) / 1e9
+                        assertTrue("a noisy recording is denoised", enroller.denoisedLast)
+                        val raw = enroller.enroll(noisy, NanoEngine.SAMPLE_RATE, denoise = false)
+                        val withDenoise = cosine(cleaned.speaker, preset.voice.speaker)
+                        val without = cosine(raw.speaker, preset.voice.speaker)
+                        println("noisy recording (SNR %.1f dB): similarity %.3f without denoise, %.3f with (enrolling took %.1f s)"
+                            .format(NanoDenoiser.signalToNoise(noisy, NanoEngine.SAMPLE_RATE), without, withDenoise, took))
+                        save("cloned-from-noisy-denoised.wav", timed("cloned from a noisy recording", engine, cleaned, NanoOptions()))
+                        assertTrue("denoising should not move the voice away: $withDenoise vs $without", withDenoise > without - 0.02)
+                        enroller.enroll(standard, NanoEngine.SAMPLE_RATE)
+                        assertTrue("a clean recording is left alone", !enroller.denoisedLast)
+                    }
+                }
             }
         }
     }

@@ -29,7 +29,7 @@ class NanoReleaseTest {
         val release = shipped()
         val speech = release.files(ReleaseFile.SPEECH).map { it.name }
         for (needed in NanoEngine.FILES + listOf("sea_g2p.bin", "voices_v3_nano.json")) assertTrue(needed, needed in speech)
-        assertEquals(setOf("speaker_encoder.onnx", "codec_encoder.onnx", "reference_encoder.onnx"), release.files(ReleaseFile.CLONE).map { it.name }.toSet())
+        assertEquals(setOf("speaker_encoder.onnx", "codec_encoder.onnx", "reference_encoder.onnx", "denoiser.onnx"), release.files(ReleaseFile.CLONE).map { it.name }.toSet())
         assertEquals("Apache-2.0", release.licence)
     }
 

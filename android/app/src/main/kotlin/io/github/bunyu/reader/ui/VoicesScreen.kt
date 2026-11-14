@@ -16,6 +16,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -82,6 +87,8 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
     var pending by remember { mutableStateOf<Pair<File, String>?>(null) }
     var problem by remember { mutableStateOf<Int?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<io.github.bunyu.reader.voice.ReaderVoice?>(null) }
     val player = remember { mutableStateOf<MediaPlayer?>(null) }
     DisposableEffect(Unit) { onDispose { player.value?.release() } }
     fun play(file: File?) {
@@ -132,6 +139,14 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
     }
     LaunchedEffect(incoming) { incoming?.let { consumed(); receive(it) } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(::receive) }
+    val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) recording = true else problem = R.string.record_permission
+    }
+    fun record() {
+        problem = null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) recording = true
+        else microphone.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_voices)) }) }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -150,8 +165,13 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                             Text(stringResource(R.string.voices_your), style = MaterialTheme.typography.titleMedium)
                             Text(stringResource(R.string.voices_clone_how), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 6.dp))
                             if (!app.vieneu.canClone) Text(stringResource(R.string.voice_clone_download, app.vieneu.release.bytes(ReleaseFile.CLONE) / 1_000_000), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Button(onClick = { pick.launch(arrayOf("audio/*", "application/octet-stream", "application/zip")) }, enabled = !busy, modifier = Modifier.padding(top = 6.dp)) {
-                                Icon(Icons.Filled.Add, null); Text(stringResource(R.string.voice_clone))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                                Button(onClick = ::record, enabled = !busy) {
+                                    Icon(painterResource(R.drawable.ic_voice), null); Text(stringResource(R.string.record_voice))
+                                }
+                                OutlinedButton(onClick = { pick.launch(arrayOf("audio/*", "application/octet-stream", "application/zip")) }, enabled = !busy) {
+                                    Icon(Icons.Filled.Add, null); Text(stringResource(R.string.voice_from_file))
+                                }
                             }
                             if (busy) {
                                 if (download.running && download.total > 0) LinearProgressIndicator(progress = { download.received.toFloat() / download.total }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
@@ -167,6 +187,7 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                     Row(Modifier.fillMaxWidth().clickable { app.settings.update { it.copy(voice = choice) } }, verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(settings.voice == choice, { app.settings.update { it.copy(voice = choice) } })
                         Text(voice.name, Modifier.weight(1f))
+                        IconButton({ renaming = voice }) { Icon(Icons.Filled.Edit, stringResource(R.string.voice_rename)) }
                         IconButton({ play(app.voices.preview(voice)) }) { Icon(painterResource(R.drawable.ic_play), stringResource(R.string.voice_preview)) }
                         IconButton({ scope.launch { app.voices.delete(voice); if (app.settings.value.voice == choice) app.settings.update { it.copy(voice = null) } } }) { Icon(Icons.Filled.Delete, stringResource(R.string.delete)) }
                     }
@@ -187,6 +208,16 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                     }
                 }
             }
+        }
+    }
+    if (recording) RecordDialog(onDismiss = { recording = false }) { clip ->
+        recording = false
+        pending = clip to context.getString(R.string.record_default_name)
+    }
+    renaming?.let { voice ->
+        RenameDialog(voice.name, onDismiss = { renaming = null }) { name ->
+            renaming = null
+            scope.launch { app.voices.rename(voice, name) }
         }
     }
     pending?.let { (clip, suggested) ->
@@ -210,5 +241,15 @@ private fun CloneDialog(suggested: String, onDismiss: () -> Unit, onConfirm: (St
             }
         },
         confirmButton = { TextButton({ onConfirm(name) }, enabled = consent && name.isNotBlank()) { Text(stringResource(R.string.voice_clone)) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
+}
+
+@Composable
+private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.voice_rename)) },
+        text = { OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.voice_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
+        confirmButton = { TextButton({ onConfirm(name) }, enabled = name.isNotBlank() && name.trim() != current) { Text(stringResource(R.string.save)) } },
         dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
 }

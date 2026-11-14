@@ -20,8 +20,8 @@ class EnrolmentFailed(val reason: String) : Exception(reason)
 /**
  * Turns a short recording into a [NanoVoice], following `prepare_reference` in the upstream SDK: the
  * speaker vector comes from Kaldi filterbank features of the whole clip, the style tokens from the codec
- * latents of its first five seconds. Upstream also denoises the clip first; this port does not, so the
- * recording should be made somewhere quiet.
+ * latents of five seconds of it. Upstream always denoises the clip first; here [NanoDenoiser] runs only on
+ * a noisy recording (when `denoiser.onnx` is installed), which measured closer to the speaker either way.
  */
 class NanoEnroller(directory: File, threads: Int = 4) : Closeable {
     private val environment = OrtEnvironment.getEnvironment()
@@ -42,13 +42,23 @@ class NanoEnroller(directory: File, threads: Int = 4) : Closeable {
     private val codecEncoder = environment.createSession(File(directory, CODEC_ENCODER).absolutePath, options)
     private val referenceEncoder = environment.createSession(File(directory, REFERENCE_ENCODER).absolutePath, options)
 
+    private val denoiser = File(directory, NanoDenoiser.FILE).takeIf { it.isFile }?.let { NanoDenoiser(it, threads) }
+
+    /** Whether the last [enroll] call cleaned the recording first (for tests and diagnostics). */
+    var denoisedLast = false
+        private set
+
     @Synchronized
-    fun enroll(recording: FloatArray, sampleRate: Int): NanoVoice {
+    fun enroll(recording: FloatArray, sampleRate: Int, denoise: Boolean? = null): NanoVoice {
         val (lead, tail) = SpeechFeatures.edgeSilence(recording, sampleRate, thresholdDb = -40f)
         if (lead >= recording.size) throw EnrolmentFailed("silent")
         val keep = sampleRate / 100
-        val clip = recording.copyOfRange(max(0, lead - keep), min(recording.size, recording.size - tail + keep)).let { it.copyOf(min(it.size, MAX_SECONDS * sampleRate)) }
-        if (clip.size < MIN_SECONDS * sampleRate) throw EnrolmentFailed("too_short")
+        val trimmed = recording.copyOfRange(max(0, lead - keep), min(recording.size, recording.size - tail + keep)).let { it.copyOf(min(it.size, MAX_SECONDS * sampleRate)) }
+        if (trimmed.size < MIN_SECONDS * sampleRate) throw EnrolmentFailed("too_short")
+        // Room noise pulls the speaker vector away from the voice; on a clean recording the denoiser costs a little.
+        denoisedLast = denoiser != null && (denoise ?: (NanoDenoiser.signalToNoise(trimmed, sampleRate) < NanoDenoiser.NOISY_BELOW_DB))
+        val clip = if (denoisedLast) denoiser!!.denoise(trimmed, sampleRate) else trimmed
+        @Suppress("NAME_SHADOWING") val sampleRate = if (denoisedLast) NanoDenoiser.RATE else sampleRate
 
         val features = SpeechFeatures.fbank(SpeechFeatures.resample(clip, sampleRate, 16_000))
         SpeechFeatures.meanNormalize(features)
@@ -57,7 +67,8 @@ class NanoEnroller(directory: File, threads: Int = 4) : Closeable {
             speakerEncoder.run(mapOf(speakerEncoder.inputNames.first() to input)).use { (it[0] as OnnxTensor).floatBuffer.toArray() }
         }
 
-        val codecAudio = SpeechFeatures.resample(clip, sampleRate, NanoEngine.SAMPLE_RATE).let { it.copyOf(min(it.size, (STYLE_SECONDS * NanoEngine.SAMPLE_RATE).toInt())) }
+        // Style tokens hear five seconds: the most voiced five, since a long recording often starts with a breath or a pause.
+        val codecAudio = mostVoiced(SpeechFeatures.resample(clip, sampleRate, NanoEngine.SAMPLE_RATE), NanoEngine.SAMPLE_RATE, STYLE_SECONDS)
         val (latent, channels, length) = OnnxTensor.createTensor(environment, FloatBuffer.wrap(codecAudio), longArrayOf(1, 1, codecAudio.size.toLong())).use { input ->
             codecEncoder.run(mapOf(codecEncoder.inputNames.first() to input)).use {
                 val tensor = it[0] as OnnxTensor
@@ -87,17 +98,41 @@ class NanoEnroller(directory: File, threads: Int = 4) : Closeable {
 
     @Synchronized override fun close() {
         listOf(speakerEncoder, codecEncoder, referenceEncoder).forEach { it.close() }
+        denoiser?.close()
         options.close()
     }
 
     companion object {
+        /** The [seconds]-long stretch with the most 20 ms frames within 35 dB of the loudest one. */
+        fun mostVoiced(samples: FloatArray, sampleRate: Int, seconds: Double): FloatArray {
+            val length = (seconds * sampleRate).toInt()
+            if (samples.size <= length) return samples
+            val hop = sampleRate / 50
+            val levels = DoubleArray(samples.size / hop) { f ->
+                var sum = 0.0
+                for (i in f * hop until (f + 1) * hop) sum += samples[i].toDouble() * samples[i]
+                kotlin.math.sqrt(sum / hop + 1e-12)
+            }
+            val loudest = levels.maxOrNull() ?: return samples.copyOf(length)
+            val voiced = IntArray(levels.size) { if (20 * kotlin.math.log10(levels[it] / loudest) > -35) 1 else 0 }
+            val width = length / hop
+            var count = (0 until width).sumOf { voiced[it] }
+            var best = count; var bestStart = 0
+            for (start in 1..voiced.size - width) {
+                count += voiced[start + width - 1] - voiced[start - 1]
+                if (count > best) { best = count; bestStart = start }
+            }
+            val from = bestStart * hop
+            return samples.copyOfRange(from, from + length)
+        }
+
         const val SPEAKER_ENCODER = "speaker_encoder.onnx"
         const val CODEC_ENCODER = "codec_encoder.onnx"
         const val REFERENCE_ENCODER = "reference_encoder.onnx"
         /** The speaker vector hears at most this much of the clip. */
         const val MAX_SECONDS = 30
         const val MIN_SECONDS = 2
-        /** Style tokens come from the first seconds of the clip. */
+        /** Style tokens come from this many seconds of the clip. */
         const val STYLE_SECONDS = 5.0
     }
 }
