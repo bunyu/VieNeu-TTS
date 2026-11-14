@@ -560,6 +560,10 @@ The merged model speaks that one voice from its packed speaker embedding (no ref
 
 ---
 
+## 📱 Android reader app (this fork)
+
+[`android/`](android/README.md) holds an Android app that reads EPUB novels aloud in Vietnamese with v3 Nano on the phone, including voice cloning from a short recording. GitHub Actions builds its APK on every change under `android/`.
+
 ## 🚀 7. Roadmap <a name="roadmap"></a>
 
 - [x] **VieNeu-TTS v3 Turbo** *(on-device, personal use)*: from-scratch 48 kHz architecture — preset voices, instant voice cloning, emotion cues, batched generation, multi-speaker conversation, frame-level streaming; torch-free on CPU.
