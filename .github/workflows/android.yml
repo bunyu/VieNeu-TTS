@@ -1,0 +1,61 @@
+name: Android reader
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The runner image already has the Android SDK; only the pinned NDK is added.
+      - name: Install the NDK
+        run: |
+          sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "ndk;27.1.12297006"
+
+      - name: Install Rust targets and cargo-ndk
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Host build of the phonemiser bridge (for its unit test)
+        working-directory: android/app/native/g2p
+        run: cargo build --release --locked
+
+      - name: Phonemiser dictionary (for its unit test)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sea_g2p.bin" https://github.com/pnnbao97/sea-g2p/releases/download/v0.10.0/sea_g2p.bin
+          echo "4346e690d0711ebc5231e7a42c5c88aaf6e40377e894b4617c018fd81c6f4096  $RUNNER_TEMP/sea_g2p.bin" | sha256sum -c -
+
+      - name: Unit tests
+        env:
+          READER_G2P_DICT: ${{ runner.temp }}/sea_g2p.bin
+        run: ./gradlew --no-daemon :app:testDebugUnitTest -Preader.g2p.host=app/native/g2p/target/release
+
+      - name: Build the APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vieneu-reader-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

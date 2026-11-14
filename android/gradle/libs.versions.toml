@@ -1,0 +1,30 @@
+[versions]
+agp = "8.12.0"
+kotlin = "2.2.21"
+compose = "2025.10.01"
+coroutines = "1.10.2"
+serialization = "1.6.3"
+media3 = "1.8.0"
+onnxruntime = "1.31.1"
+[libraries]
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material = { module = "androidx.compose.material3:material3" }
+compose-icons = { module = "androidx.compose.material:material-icons-core" }
+activity = { module = "androidx.activity:activity-compose", version = "1.11.0" }
+lifecycle = { module = "androidx.lifecycle:lifecycle-runtime-compose", version = "2.9.4" }
+core = { module = "androidx.core:core-ktx", version = "1.17.0" }
+coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+serialization = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+media = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
+media-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+onnxruntime-jvm = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+junit = { module = "junit:junit", version = "4.13.2" }
+[plugins]
+android-app = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
