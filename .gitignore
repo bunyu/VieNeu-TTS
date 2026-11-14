@@ -19,3 +19,6 @@ finetune/output/
 
 # Merged Models
 merged_models_cache/
+
+# Models downloaded by run_windows.bat
+.hf-home/

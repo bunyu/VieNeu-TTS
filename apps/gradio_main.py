@@ -2737,7 +2737,25 @@ def main():
         print(f"⚠️  The Web UI is reachable beyond this machine ({where}) with no login. "
               "Set VIENEU_WEB_AUTH=user:password to require one.")
 
-    demo.queue().launch(server_name=server_name, server_port=server_port, share=share, auth=auth)
+    # Without an explicit GRADIO_SERVER_PORT, take the first free port from 7860 so a second copy
+    # (or another app on 7860) does not stop this one from starting.
+    if os.getenv("GRADIO_SERVER_PORT") is None:
+        server_port = _first_free_port(server_name, server_port, server_port + 20)
+    print(f"🌐 VieNeu-TTS: http://{'127.0.0.1' if server_name in ('0.0.0.0', '::') else server_name}:{server_port}")
+    demo.queue().launch(server_name=server_name, server_port=server_port, share=share, auth=auth,
+                        inbrowser=env_bool("VIENEU_OPEN_BROWSER", default=False))
+
+
+def _first_free_port(host: str, start: int, end: int) -> int:
+    import socket
+    for port in range(start, end):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1" if host in ("0.0.0.0", "localhost") else host, port))
+                return port
+            except OSError:
+                continue
+    raise SystemExit(f"No free port between {start} and {end - 1}; set GRADIO_SERVER_PORT.")
 
 if __name__ == "__main__":
     main()
