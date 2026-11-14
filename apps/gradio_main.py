@@ -18,6 +18,7 @@ import time
 import numpy as np
 import queue
 import threading
+from pathlib import Path
 import yaml
 import uuid
 from vieneu_utils.core_utils import join_audio_chunks, env_bool, get_silence_duration_v2, gaps_to_silence, trust_remote_code_enabled
@@ -639,12 +640,19 @@ def load_model(backbone_choice: str, codec_choice: str, device_choice: str,
                 # Chỉ ảnh hưởng đường CPU/ONNX; trên GPU dùng PyTorch nên bỏ qua.
                 v3_precision = backbone_config.get("precision", "int8")
                 print(f"   🎚️  Precision: {v3_precision}")
+                # On a CUDA card, pick a dtype and batch size that suit it (GTX 10-series:
+                # float32, since its half precision is very slow and it has no bfloat16).
+                from vieneu.gpu_support import turbo_gpu_kwargs
+                v3_gpu = turbo_gpu_kwargs() if v3_device != "cpu" else {}
+                if v3_gpu:
+                    print(f"   🖥️  GPU settings: {v3_gpu}")
                 tts = Vieneu(
                     mode="v3turbo",
                     backbone_repo=backbone_config["repo"],
                     device=v3_device,
                     precision=v3_precision,
                     hf_token=custom_hf_token,
+                    **{k: v for k, v in v3_gpu.items() if k != "device"},
                 )
             elif "v2-Turbo" in backbone_choice:
                 # VieNeu v2 Turbo uses the dedicated backend
@@ -2097,6 +2105,28 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             label="Ví dụ file .srt (bấm để nạp thử — số thứ tự, mốc thời gian, lời thoại)",
                         )
 
+                    # --- TAB: BOOK → AUDIO (one file per chapter / per part) ---
+                    with gr.Tab("📚 Sách → audio", id="book_tab") as book_tab:
+                        gr.Markdown(
+                            "Chọn **một file .epub** (mỗi chương thành một file audio), **một file .txt**, hoặc "
+                            "**một thư mục** chứa các phần .txt / .epub (mỗi phần một file, xếp theo tên: Phần 2 trước Phần 10). "
+                            "File đã xong sẽ được bỏ qua, nên bấm lại là chạy tiếp chỗ đã dừng."
+                        )
+                        book_source = gr.Textbox(label="📂 Đường dẫn file .epub / .txt hoặc thư mục",
+                                                 placeholder=r"Ví dụ: D:\Sach\Truyen.epub hoặc D:\Sach\Truyen")
+                        book_upload = gr.File(label="… hoặc kéo thả file .epub / .txt vào đây", file_types=[".epub", ".txt"],
+                                              file_count="single", type="filepath")
+                        book_out = gr.Textbox(label="📁 Thư mục lưu audio",
+                                              placeholder="Để trống: tạo thư mục '<tên sách> - audio' cạnh file nguồn")
+                        book_voice = gr.Dropdown(choices=[], value=None, label="Giọng đọc", allow_custom_value=True,
+                                                 info="Giọng mẫu hoặc giọng bạn đã lưu ở tab Voice Cloning.")
+                        book_format = gr.Radio(["mp3", "wav", "flac"], value="mp3", label="Định dạng")
+                        with gr.Row():
+                            btn_book_list = gr.Button("🔎 Xem danh sách phần", variant="secondary")
+                            btn_book_run = gr.Button("📚 Tạo audio cho cả sách", variant="primary", interactive=False)
+                            btn_book_stop = gr.Button("⏹️ Dừng", variant="stop")
+                        book_log = gr.Textbox(label="Tiến trình", lines=12, max_lines=24, interactive=False, autoscroll=True)
+
                     # --- TAB 4: VOICE CLONING (v3 Turbo / Nano, v2 GPU) ---
                     # Shown whenever the selected backbone can clone (load_model / on_backbone_change
                     # keep it in sync); the default backbone is v3 Turbo, so it is visible from the start.
@@ -2581,6 +2611,71 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             return gr.update(choices=voices, value=default_v), gr.update(interactive=bool(values) and hasattr(tts, "infer_batch"))
 
         srt_tab.select(_srt_voices, outputs=[srt_voice, btn_generate_srt])
+
+        # --- Book → audio ---
+        def _book_voices():
+            voices_update, _ = _srt_voices()
+            return voices_update, gr.update(interactive=bool(model_loaded and tts is not None and hasattr(tts, "infer")))
+
+        book_tab.select(_book_voices, outputs=[book_voice, btn_book_run])
+
+        def _book_source(path_text, upload):
+            path = (path_text or "").strip().strip('"') or upload
+            if not path:
+                raise ValueError("Hãy nhập đường dẫn hoặc kéo thả một file .epub / .txt.")
+            if not os.path.exists(path):
+                raise ValueError(f"Không tìm thấy: {path}")
+            return path
+
+        def _book_list(path_text, upload):
+            from apps.book_batch import collect_parts
+            try:
+                parts = collect_parts(_book_source(path_text, upload))
+            except Exception as e:  # noqa: BLE001
+                return f"❌ {e}"
+            total = sum(len(p.text) for p in parts)
+            lines = [f"{i:4d}. {p.title}  ({len(p.text):,} ký tự)" for i, p in enumerate(parts, 1)]
+            return "\n".join([f"{len(parts)} phần, {total:,} ký tự:"] + lines)
+
+        btn_book_list.click(_book_list, inputs=[book_source, book_upload], outputs=[book_log])
+
+        def _book_run(path_text, upload, out_dir, voice_choice, fmt):
+            from apps.book_batch import convert_book, default_output_dir
+            if not model_loaded or tts is None:
+                yield "⚠️ Vui lòng tải model trước!"
+                return
+            try:
+                source = _book_source(path_text, upload)
+            except Exception as e:  # noqa: BLE001
+                yield f"❌ {e}"
+                return
+            _STOP_EVENT.clear()
+            # A dropped file lives in Gradio's temp folder; write next to it only if asked.
+            target = (out_dir or "").strip().strip('"') or (None if path_text else str(Path.home() / "Music" / f"{Path(source).stem} - audio"))
+            log: list[str] = []
+            done = threading.Event()
+            error: list[BaseException] = []
+
+            def work():
+                try:
+                    convert_book(tts, source, target, resolve_voice_id(voice_choice) if voice_choice else None,
+                                 fmt, stop=_STOP_EVENT, report=log.append)
+                except BaseException as e:  # noqa: BLE001
+                    error.append(e)
+                finally:
+                    done.set()
+
+            threading.Thread(target=work, daemon=True).start()
+            log.append(f"📁 Lưu vào: {target or default_output_dir(Path(source))}")
+            while not done.wait(1.0):
+                yield "\n".join(log[-200:])
+            if error:
+                log.append(f"❌ Lỗi: {error[0]}")
+            yield "\n".join(log[-200:])
+
+        btn_book_run.click(_book_run, inputs=[book_source, book_upload, book_out, book_voice, book_format],
+                           outputs=[book_log])
+        btn_book_stop.click(lambda: _STOP_EVENT.set(), outputs=None)
 
         def _srt_run(srt_path, voice_choice, keep_timing, fmt, use_batch_flag, batch_size):
             _STOP_EVENT.clear()
