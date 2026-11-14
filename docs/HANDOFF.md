@@ -59,11 +59,14 @@ Not done:
 - **v3 Turbo on the phone** (asked for: a choice between Nano and Turbo). Not started.
   It needs a Kotlin port of `src/vieneu/_v3_turbo_engine/onnx_runtime_lite.py`
   (prefill / decode-step / acoustic graphs with a KV cache, the heads in an `.npz`,
-  sampling, the MOSS codec at 48 kHz), a download manifest (the fp32 backbone alone is
-  415 MB; with heads and codec about 520 MB) and real-model tests. From the desktop
-  ratio (Turbo 0.55–0.62 against Nano 0.22) the 14T would make Turbo speech at about
-  0.7× listening speed, so it would be for "Prepare whole book", not live listening.
-  Audio made on the PC and imported gives the same voice today.
+  sampling over 16 codebooks per frame, a byte-level BPE tokenizer, the MOSS codec at
+  48 kHz), a download manifest (the fp32 backbone alone is 415 MB; with heads and codec
+  about 520 MB) and real-model tests. Measured on this PC (i7-6700, 4 threads, ONNX on
+  the CPU, same passage): Nano 3.64× listening speed, Turbo fp32 0.88×, so Turbo is 4.1
+  times slower. The 14T makes Nano speech at 1.8–2×, which puts Turbo there at about
+  0.45×: a night of eight hours would prepare under four hours of audio, with the CPU
+  flat out. Audio made on the PC (GTX 1060: 2.3× listening speed) and imported gives
+  the same voice today, so the port was left until that has been tried.
 - Smaller or quantised Nano graphs and the XNNPACK backend were not tried.
 
 ## What exists
