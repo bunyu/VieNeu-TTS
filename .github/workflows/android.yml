@@ -25,10 +25,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-
+      # The runner image already has the Android SDK; only the pinned NDK is added.
       - name: Install the NDK
-        run: sdkmanager --install "ndk;27.1.12297006"
+        run: |
+          sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "ndk;27.1.12297006"
 
       - name: Install Rust targets and cargo-ndk
         run: |
