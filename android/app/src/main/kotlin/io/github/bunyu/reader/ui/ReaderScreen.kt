@@ -107,8 +107,9 @@ fun ReaderScreen(bookId: String, onBack: () -> Unit, onSetup: (Tab) -> Unit) {
                         AssistChip(onClick = { dialog = "speed" }, label = { Text("%.2f×".format(settings.speed).replace(".00", "")) }, leadingIcon = { Icon(painterResource(R.drawable.ic_speed), null, Modifier.size(18.dp)) })
                         AssistChip(onClick = { dialog = "sleep" }, label = { SleepLabel(state.sleepAt, state.sleepAtChapterEnd) }, leadingIcon = { Icon(painterResource(R.drawable.ic_timer), null, Modifier.size(18.dp)) })
                         FilterChip(selected = settings.musicOn && settings.musicUri != null, onClick = { dialog = "music" }, label = { Text(stringResource(R.string.music)) }, leadingIcon = { Icon(painterResource(R.drawable.ic_music), null, Modifier.size(18.dp)) })
+                        FilterChip(selected = settings.pauses.custom.isNotEmpty(), onClick = { dialog = "pauses" }, label = { Text(stringResource(R.string.pause_chip)) })
                         FilterChip(selected = state.preparingAll, onClick = { narration.prepareAll(!state.preparingAll) },
-                            label = { Text(if (state.preparingAll) stringResource(R.string.preparing_all, state.preparedTotal, state.totalPieces) else stringResource(R.string.prepare_all)) },
+                            label = { Text(if (state.preparingAll) stringResource(R.string.preparing_all, state.preparedTotal, state.totalPieces - state.preparedFrom, state.preparedFromChapter + 1) else stringResource(R.string.prepare_all)) },
                             leadingIcon = { Icon(painterResource(R.drawable.ic_prepare), null, Modifier.size(18.dp)) })
                     }
                 }
@@ -147,6 +148,7 @@ fun ReaderScreen(bookId: String, onBack: () -> Unit, onSetup: (Tab) -> Unit) {
         "speed" -> SpeedDialog(settings.speed, { s -> app.settings.update { it.copy(speed = s) } }) { dialog = null }
         "sleep" -> SleepDialog({ narration.sleepAfter(it) }, { narration.sleepAtChapterEnd() }) { dialog = null }
         "music" -> MusicDialog { dialog = null }
+        "pauses" -> PauseDialog(settings.pauses, { p -> app.settings.update { it.copy(pauses = p) } }) { dialog = null }
     }
 }
 

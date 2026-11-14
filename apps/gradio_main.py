@@ -2121,6 +2121,8 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                         book_voice = gr.Dropdown(choices=[], value=None, label="Giọng đọc", allow_custom_value=True,
                                                  info="Giọng mẫu hoặc giọng bạn đã lưu ở tab Voice Cloning.")
                         book_format = gr.Radio(["mp3", "wav", "flac"], value="mp3", label="Định dạng")
+                        book_pause = gr.Slider(0.0, 3.0, value=0.35, step=0.05, label="⏸️ Ngắt nghỉ giữa các đoạn (giây)",
+                                               info="Chèn thẻ như [0.8] hoặc [2] vào văn bản để dừng đúng số giây đó (tối đa 10; [10][10] là 20 giây).")
                         with gr.Row():
                             btn_book_list = gr.Button("🔎 Xem danh sách phần", variant="secondary")
                             btn_book_run = gr.Button("📚 Tạo audio cho cả sách", variant="primary", interactive=False)
@@ -2639,7 +2641,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
 
         btn_book_list.click(_book_list, inputs=[book_source, book_upload], outputs=[book_log])
 
-        def _book_run(path_text, upload, out_dir, voice_choice, fmt):
+        def _book_run(path_text, upload, out_dir, voice_choice, fmt, paragraph_pause=0.35):
             from apps.book_batch import convert_book, default_output_dir
             if not model_loaded or tts is None:
                 yield "⚠️ Vui lòng tải model trước!"
@@ -2659,7 +2661,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             def work():
                 try:
                     convert_book(tts, source, target, resolve_voice_id(voice_choice) if voice_choice else None,
-                                 fmt, stop=_STOP_EVENT, report=log.append)
+                                 fmt, stop=_STOP_EVENT, report=log.append, paragraph_pause=float(paragraph_pause))
                 except BaseException as e:  # noqa: BLE001
                     error.append(e)
                 finally:
@@ -2673,7 +2675,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                 log.append(f"❌ Lỗi: {error[0]}")
             yield "\n".join(log[-200:])
 
-        btn_book_run.click(_book_run, inputs=[book_source, book_upload, book_out, book_voice, book_format],
+        btn_book_run.click(_book_run, inputs=[book_source, book_upload, book_out, book_voice, book_format, book_pause],
                            outputs=[book_log])
         btn_book_stop.click(lambda: _STOP_EVENT.set(), outputs=None)
 

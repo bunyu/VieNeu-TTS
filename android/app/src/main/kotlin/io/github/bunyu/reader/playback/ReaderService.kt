@@ -110,7 +110,7 @@ class ReaderService : Service() {
         val text = when {
             s.error != null -> getString(R.string.status_problem)
             s.waiting -> getString(R.string.status_waiting)
-            s.preparingAll && !s.playing -> getString(R.string.status_preparing, s.preparedTotal, s.totalPieces)
+            s.preparingAll && !s.playing -> getString(R.string.status_preparing, s.preparedTotal, s.totalPieces - s.preparedFrom, s.preparedFromChapter + 1)
             else -> s.chapterTitle
         }
         fun action(name: String) = PendingIntent.getService(this, name.hashCode(), Intent(this, ReaderService::class.java).setAction(name), PendingIntent.FLAG_IMMUTABLE)

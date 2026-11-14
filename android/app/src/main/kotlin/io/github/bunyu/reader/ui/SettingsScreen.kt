@@ -63,6 +63,17 @@ fun SettingsScreen(modifier: Modifier) {
                 }
             }
             item {
+                var pauses by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.pause_title))
+                        Text(stringResource(R.string.pause_summary, settings.pauses.custom.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton({ pauses = true }) { Text(stringResource(R.string.pause_open)) }
+                }
+                if (pauses) PauseDialog(settings.pauses, { p -> app.settings.update { it.copy(pauses = p) } }) { pauses = false }
+            }
+            item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.mobile_data), Modifier.weight(1f))
                     Switch(settings.allowMobileData, { on -> app.settings.update { it.copy(allowMobileData = on) } })

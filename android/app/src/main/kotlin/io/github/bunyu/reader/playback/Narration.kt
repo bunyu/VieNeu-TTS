@@ -45,7 +45,10 @@ data class NarrationState(
     val readyAhead: Int = 0,
     val rendering: Boolean = false,
     val preparingAll: Boolean = false,
+    /** Pieces ready between [preparedFrom] (where "prepare the book" started) and the end of the book. */
     val preparedTotal: Int = 0,
+    val preparedFrom: Int = 0,
+    val preparedFromChapter: Int = 0,
     val sleepAt: Long? = null,
     val sleepAtChapterEnd: Boolean = false,
     val skipped: Int = 0,
@@ -77,6 +80,8 @@ class Narration(private val context: Context, private val library: Library, priv
     private var book: OpenBook? = null
     private var voice: ResolvedVoice? = null
     private var queuedUntil = -1          // last book piece index added to the player
+    /** Set when "prepare the book" starts, so the render loop counts what is already ready from that point. */
+    @Volatile private var recount = false
     private var position = 0              // book piece index being heard
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var renderJob: Job? = null
@@ -161,7 +166,12 @@ class Narration(private val context: Context, private val library: Library, priv
 
     /** Generate every remaining piece of the book, e.g. overnight while charging, so playback never waits. */
     fun prepareAll(on: Boolean) {
-        mutable.value = mutable.value.copy(preparingAll = on)
+        // From where the listener is to the end: earlier chapters are already heard (or skipped on purpose).
+        val from = position
+        val chapter = book?.pieces?.getOrNull(from)?.chapter ?: 0
+        mutable.value = mutable.value.copy(preparingAll = on, preparedFrom = from, preparedFromChapter = chapter,
+            preparedTotal = 0)
+        recount = on
         if (on) { ReaderService.start(context); wake.trySend(Unit) }
     }
 
@@ -284,8 +294,12 @@ class Narration(private val context: Context, private val library: Library, priv
         val folder = library.audioDir(opened.book.id)
         val resolved = ensureVoice() ?: return
         queueReady(resolved)
-        if (mutable.value.preparingAll) mutable.value = mutable.value.copy(preparedTotal = countReady(opened, folder, resolved))
+        if (mutable.value.preparingAll) mutable.value = mutable.value.copy(preparedTotal = countReady(opened, folder, resolved, mutable.value.preparedFrom))
         while (true) {
+            if (recount && mutable.value.preparingAll) {
+                recount = false
+                mutable.value = mutable.value.copy(preparedTotal = countReady(opened, folder, resolved, mutable.value.preparedFrom))
+            }
             val ahead = if (mutable.value.preparingAll) opened.pieces.size else settings.value.prepareAhead
             val limit = (position + ahead).coerceAtMost(opened.pieces.size - 1)
             val target = (queuedUntil + 1..limit).firstOrNull { !renderer.file(folder, resolved, opened.pieces[it]).isFile }
@@ -304,7 +318,7 @@ class Narration(private val context: Context, private val library: Library, priv
                 withContext(Dispatchers.IO) { skip(folder, resolved, opened, target) }
                 mutable.value = mutable.value.copy(skipped = mutable.value.skipped + 1)
             }
-            if (mutable.value.preparingAll) mutable.value = mutable.value.copy(preparedTotal = mutable.value.preparedTotal + 1)
+            if (mutable.value.preparingAll && target >= mutable.value.preparedFrom) mutable.value = mutable.value.copy(preparedTotal = mutable.value.preparedTotal + 1)
             queueReady(resolved)
         }
     }
@@ -315,8 +329,8 @@ class Narration(private val context: Context, private val library: Library, priv
         file.copyTo(renderer.file(folder, voice, opened.pieces[index]), overwrite = true)
     }
 
-    private suspend fun countReady(opened: OpenBook, folder: File, voice: ResolvedVoice) = withContext(Dispatchers.IO) {
-        opened.pieces.count { renderer.file(folder, voice, it).isFile }
+    private suspend fun countReady(opened: OpenBook, folder: File, voice: ResolvedVoice, from: Int) = withContext(Dispatchers.IO) {
+        opened.pieces.drop(from).count { renderer.file(folder, voice, it).isFile }
     }
 
     /** Forgets the open book, e.g. when it is deleted. */

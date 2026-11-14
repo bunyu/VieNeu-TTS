@@ -34,6 +34,8 @@ import soundfile as sf
 
 FORMATS = {"mp3": ("MP3", "MPEG_LAYER_III"), "wav": ("WAV", "PCM_16"), "flac": ("FLAC", "PCM_16")}
 PIECE_CHARS = 1500  # text handed to the engine per call; bounds memory and gives progress ticks
+PAUSE_TAG = re.compile(r"\[\s*(\d{1,2}(?:[.,]\d{1,3})?)\s*\]")
+MAX_TAG_SECONDS = 10.0
 
 
 @dataclass
@@ -189,9 +191,33 @@ def pieces(text: str, limit: int = PIECE_CHARS) -> Iterator[str]:
         yield "\n".join(buf)
 
 
+def split_pause_tags(text: str) -> List[tuple]:
+    """``[0.8]`` / ``[2]`` tags (seconds, at most 10 each, ``[10][10]`` = 20 s) → [(text, pause_after_seconds)]."""
+    out: List[tuple] = []
+    at = 0
+    pending = 0.0
+    for m in PAUSE_TAG.finditer(text):
+        chunk = text[at:m.start()]
+        if chunk.strip():
+            out.append([chunk.strip(), 0.0])
+        seconds = min(float(m.group(1).replace(",", ".")), MAX_TAG_SECONDS)
+        if out and not chunk.strip():
+            out[-1][1] += seconds
+        elif out:
+            out[-1][1] = seconds
+        else:
+            out.append(["", seconds])
+        at = m.end()
+    rest = text[at:]
+    if rest.strip():
+        out.append([rest.strip(), 0.0])
+    return [tuple(x) for x in out]
+
+
 def convert_book(tts, source, out_dir=None, voice: Optional[str] = None, fmt: str = "mp3",
                  stop: Optional[threading.Event] = None,
-                 report: Callable[[str], None] = print) -> List[Path]:
+                 report: Callable[[str], None] = print, paragraph_pause: float = 0.35) -> List[Path]:
+    """``paragraph_pause``: seconds of silence between paragraphs; ``[n]`` tags in the text add exact pauses."""
     """Write one audio file per part; returns the files written or already present."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {sorted(FORMATS)}")
@@ -221,9 +247,12 @@ def convert_book(tts, source, out_dir=None, voice: Optional[str] = None, fmt: st
             for piece in pieces(part.text):
                 if stop is not None and stop.is_set():
                     break
-                wav = np.asarray(tts.infer(piece, **kwargs), dtype=np.float32).reshape(-1)
-                sink.write(np.concatenate([wav, np.zeros(int(0.35 * tts.sample_rate), np.float32)]))
-                part_audio_s += len(wav) / tts.sample_rate
+                for spoken, pause in split_pause_tags(piece):
+                    wav = (np.asarray(tts.infer(spoken, **kwargs), dtype=np.float32).reshape(-1)
+                           if any(ch.isalnum() for ch in spoken) else np.zeros(0, np.float32))
+                    gap = pause if pause > 0 else paragraph_pause
+                    sink.write(np.concatenate([wav, np.zeros(int(gap * tts.sample_rate), np.float32)]))
+                    part_audio_s += (len(wav) / tts.sample_rate) + gap
                 done_chars += len(piece)
                 elapsed = time.perf_counter() - started
                 eta = elapsed / max(done_chars, 1) * (total_chars - done_chars)
@@ -260,12 +289,13 @@ def main():
     parser.add_argument("--voice", help="preset or saved voice name (default: the model's default voice)")
     parser.add_argument("--format", default="mp3", choices=sorted(FORMATS))
     parser.add_argument("--list", action="store_true", help="only list the parts that would be read")
+    parser.add_argument("--paragraph-pause", type=float, default=0.35, help="seconds between paragraphs")
     args = parser.parse_args()
     if args.list:
         for i, p in enumerate(collect_parts(Path(args.source)), 1):
             print(f"{i:4d}. {p.title}  ({len(p.text)} ký tự)")
         return
-    convert_book(load_turbo(), args.source, args.out, args.voice, args.format)
+    convert_book(load_turbo(), args.source, args.out, args.voice, args.format, paragraph_pause=args.paragraph_pause)
 
 
 if __name__ == "__main__":

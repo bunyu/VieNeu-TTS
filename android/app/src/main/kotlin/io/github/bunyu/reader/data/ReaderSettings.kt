@@ -2,6 +2,7 @@ package io.github.bunyu.reader.data
 
 import android.content.Context
 import io.github.bunyu.reader.text.Dialect
+import io.github.bunyu.reader.text.PauseRules
 import io.github.bunyu.reader.text.VietnameseText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,8 @@ data class Settings(
     val prepareAhead: Int = 40,
     /** Half the generation steps: about twice as fast, slightly rougher. */
     val fast: Boolean = false,
+    /** Pauses the user set per punctuation mark; unchanged marks keep the model's natural flow. */
+    val pauses: PauseRules = PauseRules(),
 ) {
     fun textRules() = VietnameseText(dialect, VietnameseText.parsePronunciations(pronunciations))
 }
@@ -59,6 +62,7 @@ class ReaderSettings(context: Context) {
         allowMobileData = prefs.getBoolean("allowMobileData", false),
         prepareAhead = prefs.getInt("prepareAhead", 40).coerceIn(5, 400),
         fast = prefs.getBoolean("fast", false),
+        pauses = PauseRules.decode(prefs.getString("pauses", null)),
     )
 
     fun update(change: (Settings) -> Settings) {
@@ -75,6 +79,7 @@ class ReaderSettings(context: Context) {
             .putBoolean("allowMobileData", next.allowMobileData)
             .putInt("prepareAhead", next.prepareAhead.coerceIn(5, 400))
             .putBoolean("fast", next.fast)
+            .putString("pauses", next.pauses.encode())
             .apply()
         state.value = next
     }

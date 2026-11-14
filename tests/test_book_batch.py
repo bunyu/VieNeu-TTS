@@ -98,3 +98,19 @@ def test_stop_leaves_no_partial_file(tmp_path):
     stop.set()
     convert_book(FakeTts(), src, tmp_path / "out", fmt="wav", stop=stop, report=lambda _: None)
     assert list((tmp_path / "out").iterdir()) == []
+
+
+def test_pause_tags_split_and_add_up():
+    from apps.book_batch import split_pause_tags
+    assert split_pause_tags("Một [0.8] hai [10][10] ba") == [("Một", 0.8), ("hai", 20.0), ("ba", 0.0)]
+    assert split_pause_tags("[25] A [1,5]") == [("", 10.0), ("A", 1.5)]
+    assert split_pause_tags("Xem [chú thích].") == [("Xem [chú thích].", 0.0)]
+
+
+def test_tags_become_silence(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("một [2] hai", encoding="utf-8")
+    tts = FakeTts()
+    out = convert_book(tts, src, tmp_path / "out", fmt="wav", report=lambda _: None, paragraph_pause=0.0)
+    assert tts.calls == ["một", "hai"]
+    assert sf.info(str(out[0])).frames == 800 * 2 + 2 * 8000

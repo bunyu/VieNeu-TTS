@@ -13,7 +13,7 @@ data class Piece(val text: String, val pause: Pause)
  */
 object Chunker {
     /** Abbreviations whose dot does not end a sentence. Compared lowercase, without the dot. */
-    private val NO_BREAK = setOf("tp", "gs", "pgs", "ts", "ths", "bs", "ks", "v.v", "mr", "mrs", "ms", "dr", "st", "tr", "q", "p", "ông", "bà", "no", "vol")
+    internal val NO_BREAK = setOf("tp", "gs", "pgs", "ts", "ths", "bs", "ks", "v.v", "mr", "mrs", "ms", "dr", "st", "tr", "q", "p", "ông", "bà", "no", "vol")
     private val END = Regex("[.!?…]+[\"')\\]»”’]*")
 
     fun split(text: String, maxChars: Int = 280, minChars: Int = 60): List<Piece> {
