@@ -41,8 +41,11 @@ class ResolvedVoice(val choice: VoiceChoice, val voice: NanoVoice, val rules: Vi
 
 class VoiceUnavailable(val reason: String) : Exception(reason)
 
-/** Where the parts of a piece go while it is still being generated: files in [folder], each announced through [ready]. */
-class EarlyParts(val folder: File, val ready: suspend (File) -> Unit)
+/**
+ * Where the parts of a piece go while it is still being generated: files in [folder], each announced through
+ * [ready]. With [hurry] someone is waiting for the first words, so the piece opens with short, quick parts.
+ */
+class EarlyParts(val folder: File, val hurry: Boolean, val ready: suspend (File) -> Unit)
 
 /** Turns one book piece into a short, normalized, compressed audio file in the book's audio folder. */
 class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
@@ -72,10 +75,11 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
     val speed get() = vieneu.speed
 
     /**
-     * Generates [piece] into the book's audio folder. With [early], someone is waiting to hear it: each part is
-     * handed over as its own file the moment it is spoken, the parts start short and grow, and the very first
-     * one is made with half the steps, so the first words come as soon as the phone can manage. Audio made
-     * this way is only played, never kept: the piece is generated properly the next time it is needed.
+     * Generates [piece] into the book's audio folder. With [early], the player needs it soon: each part is
+     * handed over as its own file the moment it is spoken. With [EarlyParts.hurry] someone is already waiting:
+     * the parts start short and grow, and the very first one is made with half the steps, so the first words
+     * come as soon as the phone can manage. Hurried audio is only played, never kept: the piece is generated
+     * properly the next time it is needed.
      */
     suspend fun render(folder: File, voice: ResolvedVoice, piece: BookPiece, early: EarlyParts? = null): File = withContext(Dispatchers.Default) {
         val target = file(folder, voice, piece)
@@ -85,6 +89,7 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
         val context = coroutineContext
         val polished = ArrayList<FloatArray>()
         var handedOver = 0
+        val hurried = early?.hurry == true
         suspend fun done(samples: FloatArray) {
             polished += samples
             if (early == null || samples.isEmpty()) return
@@ -103,16 +108,16 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
             val spoken = voice.rules.normalize(segment.text)
             // The model reads at most about fifteen seconds in one go, so a long stretch is spoken in parts.
             val parts = if (spoken.none { it.isLetterOrDigit() }) emptyList()
-                else Chunker.calls(spoken, maxChars = NanoEngine.MAX_CHARACTERS, minChars = 40, quickStart = early != null && call == 0)
+                else Chunker.calls(spoken, maxChars = NanoEngine.MAX_CHARACTERS, minChars = 40, quickStart = hurried && call == 0)
             if (parts.isEmpty() && segment.pauseMillis != null) done(FloatArray((rate.toLong() * after / 1000).toInt()))
             parts.forEachIndexed { index, part ->
                 context.ensureActive()
-                val hurry = early != null && call == 0
+                val hurry = hurried && call == 0
                 val samples = vieneu.speak(part.text, voice.voice, voice.fast || hurry, voice.seed(piece, call++), measure = !hurry) { !context.isActive }
                 done(AudioPolish.finish(samples, rate, if (index == parts.lastIndex) after else part.pause.millis))
             }
         }
-        if (handedOver > 0) return@withContext target
+        if (handedOver > 0 && hurried) return@withContext target
         val joined = FloatArray(polished.sumOf { it.size }).also { out -> var at = 0; for (p in polished) { p.copyInto(out, at); at += p.size } }
         val pending = File(folder, UUID.randomUUID().toString() + ".m4a")
         try {

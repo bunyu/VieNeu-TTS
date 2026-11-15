@@ -88,7 +88,8 @@ fun RecordDialog(onDismiss: () -> Unit, onRecorded: (File) -> Unit) {
                         clip != null -> {
                             TextButton({
                                 stopPlayback()
-                                player.value = runCatching { MediaPlayer().apply { setDataSource(clip!!.path); prepare(); start() } }.getOrNull()
+                                // Not apply { start() }: there a bare start() is this dialog's own start(), which records.
+                                player.value = runCatching { MediaPlayer().also { it.setDataSource(clip!!.path); it.prepare(); it.start() } }.getOrNull()
                             }) { Text(stringResource(R.string.record_play)) }
                             TextButton(::start) { Text(stringResource(R.string.record_again)) }
                         }

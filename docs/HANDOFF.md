@@ -19,10 +19,55 @@ what a developer needs: the state, how things work, what was checked and what wa
 
 Nothing is in progress.
 
+## Fixes of 2026-11-15 (after the user's first tries), none confirmed by the user yet
+
+The user tried the phone app and the fine-tune tab and reported five things. All are changed in
+the code; the APK was rebuilt (13:28) but the user has not reported back on any of them.
+
+- **Pause settings did nothing (phone).** `Narration` rebuilt its `ResolvedVoice` only when the
+  voice, dialect, pronunciations or fast mode changed, so new pause rules waited for a restart of
+  the app. Pauses now have their own collector: `PAUSE_SETTLE_MS` (0.7 s) after the last tap in
+  the dialog, the voice is resolved again and the current piece restarts.
+- **Silence going from a short passage to a long one in normal mode (phone).** Not reproduced;
+  the cause is read from the code. A piece nobody was waiting for was generated whole (up to
+  280 characters, about 10 s of work at 2×) and reached the player only when finished. Now, with
+  fewer than `STREAM_AHEAD` (4) pieces ready after the one being heard, the next piece is handed
+  over part by part (`EarlyParts`). `EarlyParts.hurry` separates the two cases: hurried (listener on
+  the last ready piece or waiting: short growing parts, first one with 8 steps, **not cached**)
+  and plain (normal parts, normal steps, **cached** as before).
+- **"Listen" started a recording (phone, both recorder dialogs).** `MediaPlayer().apply { …;
+  start() }` called the dialog's local `fun start()`, which records: in Kotlin a local function
+  wins over a member of an implicit receiver. Now `also { it.start() }` in `TrainingDialog.kt` and
+  `RecordDialog.kt`. Do not write `apply { start() }` in a scope that has its own `start()`.
+- **Recorded sentences lost parts of their sound (Windows fine-tune tab).** Gradio asks for the
+  microphone with `getUserMedia({audio: true})`, so the browser's call filters were on (noise
+  suppression, echo cancellation, automatic gain). The user's takes of that day, still in
+  `%TEMP%\gradio`, showed stretches at −80 to −94 dB and exact zeros inside sentences, and levels
+  differing by 9 dB between takes. `RAW_MIC_HEAD` in `apps/gradio_main.py` wraps `getUserMedia`
+  and turns the three filters off. Not ruled out: a filter in Windows or the microphone's driver
+  (Settings → Sound → the microphone → "Audio enhancements").
+- **Fine-tuned voices in the voice lists (Windows).** A fine-tuned voice is a model of its own, so
+  it was only reachable by loading "VieNeu-TTS-v3-Turbo 🎓 <voice>" by hand, and the phone-voice
+  list did not follow a model load. Now `model_switch_entries()` adds one entry per fine-tuned
+  model (every `finetune/output/<voice>/merged` found at start) to the voice lists of the reading,
+  book, SRT and phone-voice sections, plus a way back to the built-in voices while a fine-tuned
+  model is loaded. Their values start with `FT_SWITCH`; `_switch_model` (the lists' `input` event)
+  loads that model and refreshes the other lists. The conversation tab is left out: its speakers
+  must share one model. Checked by importing the app (entries, 4 handlers with 24 outputs each);
+  **a real switch in the browser was not run.**
+
+The user trained a first real voice, `phuc`, from 40 sentences (`finetune/output/phuc`); it loads
+and is used. Its takes were recorded partly before the microphone fix, so a retrain from clean
+takes may sound better.
+
+Unit tests on that day: 66 run, 64 passed, 1 skipped, `NanoModelTest` failed with the known ONNX
+allocation error (memory). It was not rerun; the later builds were `:app:assembleRelease` only.
+
 ## What to do first next time
 
-The phone has run almost none of this branch. Ask the user to install
-`android/app/build/outputs/apk/release/Doc truyen-release.apk` and try, in this order:
+Ask the user how the five fixes above behave. Then the checklist below, which is still mostly
+untried. The APK is `android/app/build/outputs/apk/release/Doc truyen-release.apk`; try, in this
+order:
 
 1. Press play at a place with nothing prepared; seek while playing; play to the end of a book.
 2. Import a short book made on the PC in `opus` with its `.sync.json` files (from files,
@@ -74,7 +119,7 @@ pressing play where nothing was ready; after them, not yet measured.
   before attaching LoRA, and PEFT then crashed in `get_input_embeddings`; it is now
   switched on afterwards, non-reentrant. Checked with a 20-clip trial next to the running
   app: about 10 s per optimizer step of 16 clips, `acc_cb0` 0.41, merge 2 min 40 s, the
-  merged model loads in 34 s and speaks. **No real voice has been trained yet.**
+  merged model loads in 34 s and speaks. The user has since trained `phuc` (40 sentences).
 - **Phone voices** (`apps/phone_voice.py`, accordion "📱 Dùng giọng trên app điện thoại").
   The chosen voice of the loaded Turbo model reads a ~10 s passage; Nano of the phone's
   release (files from `android/app/src/main/assets/vieneu-release.json`, downloaded with
@@ -136,7 +181,9 @@ pressing play where nothing was ready; after them, not yet measured.
 - **First sound.** A piece someone waits for is made in calls of growing size (opening
   sentence ≥ 30 characters, ~70, then full), the first with 8 steps; those parts are
   played from `cacheDir/early-parts` and **not cached**: the piece is generated properly
-  next time. `play()` restarts the piece this way when nothing is queued.
+  next time. `play()` restarts the piece this way when nothing is queued. A piece that is
+  only needed soon (fewer than 4 ready ahead) is also played from parts, but made the
+  normal way and cached.
 - **Hold.** When playback runs dry and the measured speed is below 1×, it waits for
   `HOLD_PIECES` (3) before resuming, and offers fast mode.
 - **Pauses.** A mark at its default keeps the model's flow; a changed mark splits there

@@ -29,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -133,6 +134,13 @@ class Narration(private val context: Context, private val library: Library, priv
         })
         scope.launch {
             settings.flow.map { listOf(it.voice, it.dialect, it.pronunciations, it.fast) }.distinctUntilChanged().collect {
+                if (book != null) { voice = null; reload(position, play = player.playWhenReady) }
+            }
+        }
+        // Changed pauses change the audio too. The dialog moves in 0.1 s taps, so wait until the taps stop.
+        scope.launch {
+            settings.flow.map { it.pauses }.distinctUntilChanged().collectLatest {
+                delay(PAUSE_SETTLE_MS)
                 if (book != null) { voice = null; reload(position, play = player.playWhenReady) }
             }
         }
@@ -385,8 +393,11 @@ class Narration(private val context: Context, private val library: Library, priv
             }
             mutable.value = mutable.value.copy(rendering = true)
             var played = 0
-            // The listener is on the last ready piece, or already waiting: play this one part by part as it is generated.
-            val early = if (target == queuedUntil + 1 && queuedUntil <= position && holdFrom < 0 && player.playWhenReady) EarlyParts(earlyDir) { part ->
+            // Little is ready ahead of the listener: hand this piece to the player part by part as it is generated,
+            // so a long piece after short ones starts on time instead of only when all of it is done. When the
+            // listener is on the last ready piece, or already waiting, the first words are also made the quick way.
+            val next = target == queuedUntil + 1 && holdFrom < 0 && player.playWhenReady
+            val early = if (next && queuedUntil - position < STREAM_AHEAD) EarlyParts(earlyDir, hurry = queuedUntil <= position) { part ->
                 withContext(Dispatchers.Main) {
                     val count = player.mediaItemCount
                     player.addMediaItem(item(opened, target, part))
@@ -430,6 +441,9 @@ class Narration(private val context: Context, private val library: Library, priv
         /** Passages kept ready at the reading place when the reader asked for that, and how long the place must stay put first. */
         const val READY_WHILE_READING = 2
         const val READY_DELAY_MS = 2000L
+        /** With fewer passages than this ready after the one being heard, the next one is played part by part as it is made. */
+        const val STREAM_AHEAD = 4
+        const val PAUSE_SETTLE_MS = 700L
     }
 
     /** Forgets the open book, e.g. when it is deleted. */

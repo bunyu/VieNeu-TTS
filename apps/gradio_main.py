@@ -826,7 +826,7 @@ def load_model(backbone_choice: str, codec_choice: str, device_choice: str,
             # Editors' picks first, then A-Z
             _sort_voices(tts, voices)
 
-            voice_update = gr.update(choices=voices, value=default_v, interactive=True)
+            voice_update = gr.update(choices=with_switches(voices), value=default_v, interactive=True)
             
             global PRESET_VOICES_CACHE, CONV_VOICES_CACHE
             PRESET_VOICES_CACHE = voices
@@ -902,6 +902,28 @@ def load_model(backbone_choice: str, codec_choice: str, device_choice: str,
                 gr.update(), # conv_tab
                 *slot_no_updates
             )
+
+
+FT_SWITCH = "🎓→"  # value prefix of a voice-list entry that stands for a voice of another model
+
+
+def model_switch_entries() -> list:
+    """Voice-list entries for voices that need another model: one per fine-tuned model on this PC (every
+    ``finetune/output/<voice>/merged`` found at start, so later ones appear by themselves), and, while a
+    fine-tuned model is loaded, the way back to the built-in voices. Choosing one loads that model."""
+    entries = []
+    for label in BACKBONE_CONFIGS:
+        if "🎓" in label and label != current_backbone:
+            voice = label.split("🎓", 1)[1].strip()
+            entries.append((f"🎓 {voice} (giọng fine-tune: chọn để tự nạp model của giọng này, 30–40 giây)", FT_SWITCH + label))
+    if "🎓" in (current_backbone or ""):
+        base = next(iter(BACKBONE_CONFIGS))
+        entries.append((f"↩️ Các giọng có sẵn (chọn để tự nạp lại {base})", FT_SWITCH + base))
+    return entries
+
+
+def with_switches(voices) -> list:
+    return list(voices or []) + model_switch_entries()
 
 
 def resolve_voice_id(v_id: str) -> str:
@@ -1867,7 +1889,27 @@ EXAMPLES_LIST = [
     ["Hà Nội những ngày vào thu mang một vẻ đẹp trầm mặc và cổ kính đến lạ thường.", "Bình (nam miền Bắc)"],
 ]
 
-with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo:
+# Gradio asks the browser for the microphone with its defaults, and the browser then filters the sound for
+# calls: noise suppression mutes soft parts of a sentence and the automatic gain changes its loudness. Voice
+# recordings for cloning and fine-tuning need the microphone as it is.
+RAW_MIC_HEAD = """
+<script>
+(() => {
+  const devices = navigator.mediaDevices;
+  if (!devices || !devices.getUserMedia) return;
+  const ask = devices.getUserMedia.bind(devices);
+  devices.getUserMedia = (constraints) => {
+    if (constraints && constraints.audio) {
+      const audio = constraints.audio === true ? {} : constraints.audio;
+      constraints = {...constraints, audio: {...audio, echoCancellation: false, noiseSuppression: false, autoGainControl: false}};
+    }
+    return ask(constraints);
+  };
+})();
+</script>
+"""
+
+with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MIC_HEAD) as demo:
     # Session ID for cancellation tracking
     session_id_state = gr.State("")
 
@@ -2670,8 +2712,9 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
         def _voice_list_updates(select_voice=None):
             """Updates for every preset dropdown: story (optionally selecting the new
             voice), SRT, and the conversation speaker slots (keep their values)."""
-            story = gr.update(choices=PRESET_VOICES_CACHE, value=select_voice) if select_voice else gr.update(choices=PRESET_VOICES_CACHE)
-            return [story, gr.update(choices=PRESET_VOICES_CACHE), *([gr.update(choices=CONV_VOICES_CACHE)] * MAX_SPEAKERS)]
+            choices = with_switches(PRESET_VOICES_CACHE)
+            story = gr.update(choices=choices, value=select_voice) if select_voice else gr.update(choices=choices)
+            return [story, gr.update(choices=choices), *([gr.update(choices=CONV_VOICES_CACHE)] * MAX_SPEAKERS)]
 
         def _save_voice(audio_path, name, desc, denoise):
             no_change = [gr.update()] * (2 + MAX_SPEAKERS)
@@ -2735,9 +2778,11 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                 return gr.update(choices=[], value=None)
             current = PRESET_VOICES_CACHE[0] if PRESET_VOICES_CACHE else None
             value = current[1] if isinstance(current, (list, tuple)) else current
-            return gr.update(choices=PRESET_VOICES_CACHE, value=value)
+            return gr.update(choices=with_switches(PRESET_VOICES_CACHE), value=value)
 
         phone_acc.expand(_phone_voices, outputs=[phone_voice_dd])
+        # Another model has other voices (a fine-tuned model has only its own): follow every load, not only the opening.
+        load_event.then(_phone_voices, outputs=[phone_voice_dd])
 
         def _phone_export(voice_choice, name):
             if not model_loaded or tts is None:
@@ -2920,7 +2965,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             values = [v[1] if isinstance(v, tuple) else v for v in voices]
             if default_v not in values and values:
                 default_v = values[0]
-            return gr.update(choices=voices, value=default_v), gr.update(interactive=bool(values) and hasattr(tts, "infer_batch"))
+            return gr.update(choices=with_switches(voices), value=default_v), gr.update(interactive=bool(values) and hasattr(tts, "infer_batch"))
 
         srt_tab.select(_srt_voices, outputs=[srt_voice, btn_generate_srt])
 
@@ -2930,6 +2975,27 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             return voices_update, gr.update(interactive=bool(model_loaded and tts is not None and hasattr(tts, "infer")))
 
         book_tab.select(_book_voices, outputs=[book_voice, btn_book_run])
+
+        # --- A voice of another model (a fine-tuned voice, or back to the built-in ones): load its model ---
+        _LOAD_OUTPUTS = 8 + MAX_SPEAKERS
+
+        def _switch_model(choice, codec, device, lmdeploy):
+            if not (isinstance(choice, str) and choice.startswith(FT_SWITCH)):
+                return
+            label = choice[len(FT_SWITCH):]
+            if label not in BACKBONE_CONFIGS:
+                return
+            idle = [gr.update()] * 7
+            for out in load_model(label, codec, device, lmdeploy):
+                yield (gr.update(value=label), *tuple(out)[:_LOAD_OUTPUTS], *idle)
+            # The other voice lists follow the new model.
+            yield (gr.update(), *([gr.update()] * _LOAD_OUTPUTS), *_after_model_load(), _phone_voices(), *_srt_voices(), *_book_voices())
+
+        for _dd in (voice_select, book_voice, srt_voice, phone_voice_dd):
+            _dd.input(_switch_model, inputs=[_dd, codec_select, device_choice, use_lmdeploy_cb],
+                      outputs=[backbone_select, model_status, btn_generate, btn_generate_conv, btn_load, btn_stop, voice_select,
+                               tab_custom, conv_tab, *speaker_voice_dds,
+                               btn_generate_clone, user_voice_dd, phone_voice_dd, srt_voice, btn_generate_srt, book_voice, btn_book_run])
 
         def _book_source(path_text, upload):
             path = (path_text or "").strip().strip('"') or upload
@@ -3026,7 +3092,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                     custom_backbone_model_id, custom_backbone_base_model, custom_backbone_hf_token],
             outputs=[model_status, btn_generate, btn_generate_conv, btn_load, btn_stop, voice_select,
                      tab_custom, conv_tab, *speaker_voice_dds]
-        ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd])
+        ).then(_after_model_load, outputs=[btn_generate_clone, user_voice_dd]).then(_phone_voices, outputs=[phone_voice_dd])
 
 def main():
     # Cho phép override từ biến môi trường (hữu ích cho Docker)
