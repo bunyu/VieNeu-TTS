@@ -291,6 +291,8 @@ def autoload_model(*load_inputs):
     """
     global _autoload_started
     if _autoload_started or model_loaded or not env_bool("VIENEU_AUTOLOAD", default=False):
+        # Nothing to do, said with a yield: ending without one would set every output to None.
+        yield tuple([gr.update()] * (8 + MAX_SPEAKERS))
         return
     _autoload_started = True
     yield from load_model(*load_inputs)
@@ -2486,6 +2488,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MI
         # --- Custom Model Event Handlers ---
 
         def on_backbone_change(choice):
+            choice = choice or ""   # the box can arrive empty; without this the handler crashed
             is_custom = (choice == "Custom Model")
             is_v3 = "v3" in (choice or "").lower()
             is_v2_gpu = (choice == "VieNeu-TTS-v2 (GPU)")
@@ -2776,8 +2779,10 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MI
         def _phone_voices():
             if not (model_loaded and tts is not None and hasattr(tts, "get_preset_voice")):
                 return gr.update(choices=[], value=None)
-            current = PRESET_VOICES_CACHE[0] if PRESET_VOICES_CACHE else None
-            value = current[1] if isinstance(current, (list, tuple)) else current
+            values = [v[1] if isinstance(v, (list, tuple)) else v for v in PRESET_VOICES_CACHE]
+            # The model's own voice first: for a fine-tuned model that is the fine-tuned voice.
+            default = getattr(tts, "_default_voice", None)
+            value = default if default in values else (values[0] if values else None)
             return gr.update(choices=with_switches(PRESET_VOICES_CACHE), value=value)
 
         phone_acc.expand(_phone_voices, outputs=[phone_voice_dd])
@@ -2791,7 +2796,10 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MI
             if "v3" not in (current_backbone or "").lower() or "nano" in (current_backbone or "").lower():
                 yield "⚠️ Hãy nạp một model **v3 Turbo** (bản thường hoặc bản 🎓 đã fine-tune).", None, None, None
                 return
-            from apps.phone_voice import export
+            from apps.phone_voice import export, PHONE_VOICES
+            if isinstance(voice_choice, str) and voice_choice.startswith(FT_SWITCH):
+                yield "⚠️ Model của giọng này chưa nạp xong. Chờ dòng trạng thái báo đã tải, rồi bấm lại.", None, None, None
+                return
             voice_id = resolve_voice_id(voice_choice) if voice_choice else None
             log = []
             done = threading.Event()
@@ -2800,7 +2808,7 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MI
             def work():
                 try:
                     result.update(export(tts, voice_id, (name or "").strip() or voice_id or "Giọng của tôi",
-                                         Path.home() / "Music" / "Doc truyen - giong", report=log.append))
+                                         PHONE_VOICES, report=log.append))
                 except BaseException as e:  # noqa: BLE001
                     error.append(e)
                 finally:
@@ -2980,20 +2988,23 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html + RAW_MI
         _LOAD_OUTPUTS = 8 + MAX_SPEAKERS
 
         def _switch_model(choice, codec, device, lmdeploy):
-            if not (isinstance(choice, str) and choice.startswith(FT_SWITCH)):
-                return
-            label = choice[len(FT_SWITCH):]
+            label = choice[len(FT_SWITCH):] if isinstance(choice, str) and choice.startswith(FT_SWITCH) else None
             if label not in BACKBONE_CONFIGS:
+                # An ordinary voice: change nothing. This must be yielded: a generator that ends without
+                # a yield makes Gradio set every output to None, which emptied all the voice lists.
+                yield tuple([gr.update()] * (_LOAD_OUTPUTS + 7))
                 return
             idle = [gr.update()] * 7
             for out in load_model(label, codec, device, lmdeploy):
-                yield (gr.update(value=label), *tuple(out)[:_LOAD_OUTPUTS], *idle)
+                yield (*tuple(out)[:_LOAD_OUTPUTS], *idle)
             # The other voice lists follow the new model.
-            yield (gr.update(), *([gr.update()] * _LOAD_OUTPUTS), *_after_model_load(), _phone_voices(), *_srt_voices(), *_book_voices())
+            yield (*([gr.update()] * _LOAD_OUTPUTS), *_after_model_load(), _phone_voices(), *_srt_voices(), *_book_voices())
 
         for _dd in (voice_select, book_voice, srt_voice, phone_voice_dd):
             _dd.input(_switch_model, inputs=[_dd, codec_select, device_choice, use_lmdeploy_cb],
-                      outputs=[backbone_select, model_status, btn_generate, btn_generate_conv, btn_load, btn_stop, voice_select,
+                      # The model box at the top is left alone (setting it from here reached its change handler empty);
+                      # the status line under it names the model that is loaded.
+                      outputs=[model_status, btn_generate, btn_generate_conv, btn_load, btn_stop, voice_select,
                                tab_custom, conv_tab, *speaker_voice_dds,
                                btn_generate_clone, user_voice_dd, phone_voice_dd, srt_voice, btn_generate_srt, book_voice, btn_book_run])
 
@@ -3130,7 +3141,10 @@ def main():
     if os.getenv("GRADIO_SERVER_PORT") is None:
         server_port = _first_free_port(server_name, server_port, server_port + 20)
     print(f"🌐 VieNeu-TTS: http://{'127.0.0.1' if server_name in ('0.0.0.0', '::') else server_name}:{server_port}")
+    # The .dtvoice file is written to the user's Music folder and offered for download from there.
+    from apps.phone_voice import PHONE_VOICES
     demo.queue().launch(server_name=server_name, server_port=server_port, share=share, auth=auth,
+                        allowed_paths=[str(PHONE_VOICES)],
                         inbrowser=env_bool("VIENEU_OPEN_BROWSER", default=False))
 
 

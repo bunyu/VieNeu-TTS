@@ -53,8 +53,29 @@ the code; the APK was rebuilt (13:28) but the user has not reported back on any 
   book, SRT and phone-voice sections, plus a way back to the built-in voices while a fine-tuned
   model is loaded. Their values start with `FT_SWITCH`; `_switch_model` (the lists' `input` event)
   loads that model and refreshes the other lists. The conversation tab is left out: its speakers
-  must share one model. Checked by importing the app (entries, 4 handlers with 24 outputs each);
-  **a real switch in the browser was not run.**
+  must share one model. The model box at the top is not changed by a switch; the status line
+  names the loaded model. A fine-tuned model lists the usual voices too (28 with `phuc`); only
+  its own voice is the trained one, and the phone-voice list starts on it.
+- **The first version of that switch emptied the voice lists (fixed the same day).** For an
+  ordinary voice `_switch_model` ended without a `yield`. **A Gradio generator handler that ends
+  without yielding sets every output to `None`** (checked with a two-field test app: `(None,
+  None)` against no-op updates). That blanked the lists on every pick and sent `None` to
+  `on_backbone_change`, which crashed. Now every path yields `gr.update()` for each output;
+  `autoload_model` had the same early `return` and yields too. Keep this rule for any new
+  generator handler.
+- **The phone-voice section showed "Error" after converting (older bug).** The `.dtvoice` is
+  written to `~/Music/Doc truyen - giong` (`phone_voice.PHONE_VOICES`), which Gradio would not
+  serve; `launch()` now passes it in `allowed_paths`.
+- **The phone voice is made at the end of a fine-tune.** `apps.finetune_studio.train` ends with
+  `python -m apps.phone_voice <voice>` in a process of its own (`export_finetuned`: loads
+  `finetune/output/<voice>/merged`, converts its default voice, writes `<voice>.dtvoice`). A
+  failure there is reported with the command to retry and does not fail the training. Run by
+  hand for `phuc` beside the open app: worked. **A whole fine-tune with this last step was not
+  run.**
+- Checked by driving the real app over HTTP on another port (`gradio_client`): load the normal
+  model (28 entries in the phone list), pick an ordinary voice (all outputs no-ops), pick
+  "🎓 phuc" (its model loads), convert `phuc` (file made and served). Not clicked through in a
+  browser, and the lists' contents after the switch were not read back.
 
 The user trained a first real voice, `phuc`, from 40 sentences (`finetune/output/phuc`); it loads
 and is used. Its takes were recorded partly before the microphone fix, so a retrain from clean

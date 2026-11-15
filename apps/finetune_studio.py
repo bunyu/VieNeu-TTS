@@ -355,6 +355,12 @@ def train(name: str, epochs: float = 3.0) -> None:
     takes = _takes(folder)
     best = max((t for t in takes.values() if t["seconds"] <= 8.0), key=lambda t: t["seconds"], default=None)         or min(takes.values(), key=lambda t: t["seconds"])
     run("make_voice.py", "--audio", str(folder / "raw_audio" / best["file"]), "--name", safe_name(name), "--out", str(merged), "--default")
+    # The voice for the phone app, in a process of its own so the card is free again. A failure here
+    # does not undo the training: the same command can be run again later.
+    phone = [sys.executable, "-m", "apps.phone_voice", safe_name(name)]
+    print(f"\n== {' '.join(phone[1:])}", flush=True)
+    if subprocess.run(phone, cwd=str(ROOT)).returncode != 0:
+        print(f"⚠️ Chưa tạo được file giọng cho điện thoại. Thử lại sau bằng: .venv\\Scripts\\python.exe -m apps.phone_voice \"{safe_name(name)}\"", flush=True)
     print(f"\n✅ Xong. Mở lại app (run_windows.bat), chọn model \"{model_label(safe_name(name))}\" rồi bấm nạp model.", flush=True)
 
 

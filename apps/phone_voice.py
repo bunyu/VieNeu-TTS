@@ -132,3 +132,32 @@ def export(tts, voice_id: Optional[str], name: str, out_dir, *, description: str
         z.writestr("voice.json", json.dumps(data, ensure_ascii=False))
         z.write(sample, "sample.wav")
     return {"file": str(target), "sample": str(sample), "source": str(source)}
+
+
+PHONE_VOICES = Path.home() / "Music" / "Doc truyen - giong"
+
+
+def export_finetuned(name: str, out_dir=None, report: Callable[[str], None] = print) -> dict:
+    """The ``.dtvoice`` of the fine-tuned voice ``name``: loads its model (``finetune/output/<name>/merged``)
+    and converts its own voice. Run with the web app closed on a small card: the model needs the GPU."""
+    from apps.finetune_studio import OUTPUT, safe_name
+    merged = OUTPUT / safe_name(name) / "merged"
+    if not merged.is_dir():
+        raise ValueError(f"Chưa có model fine-tune cho giọng “{name}” ({merged}).")
+    report("Đang nạp model của giọng này…")
+    from vieneu import Vieneu
+    from vieneu.gpu_support import turbo_gpu_kwargs
+    settings = {k: v for k, v in turbo_gpu_kwargs().items() if k != "device"}
+    tts = Vieneu(mode="v3turbo", backbone_repo=str(merged), device="auto", precision="fp32", **settings)
+    # No voice id: the model's default voice is the fine-tuned one (make_voice.py --default).
+    return export(tts, None, safe_name(name), out_dir or PHONE_VOICES, description="Giọng fine-tune trên máy tính", report=report)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Make the phone voice file (.dtvoice) of a fine-tuned voice.")
+    parser.add_argument("name", help="the voice name used for fine-tuning")
+    parser.add_argument("--out", default=None, help=f"folder for the file (default: {PHONE_VOICES})")
+    arguments = parser.parse_args()
+    made = export_finetuned(arguments.name, arguments.out)
+    print(f"✅ File giọng cho điện thoại: {made['file']}", flush=True)
