@@ -112,6 +112,11 @@ recordings, and gets much closer to the quality of the built-in voices. It runs 
      If a piece does not match its sentence (a forgotten pause, a skipped sentence), nothing is
      saved and the app names the piece; a sentence under 3 seconds is left out and listed.
      Phone formats such as `.m4a` are read.
+   - **Recording in the Doc truyen app** is the easiest: see "Recordings for fine-tuning" in
+     section 2. Add its `.dtdata` file under "📱 Nhập bản thu từ điện thoại".
+   - Every recording needs its exact text, so the sentences must be ones the app showed (or
+     came from a book you gave it). A free recording of unknown words cannot be used for
+     fine-tuning; it can still be used for cloning.
    - Aim for **100–300 sentences** (10–30 minutes), each 3–15 seconds, in a quiet room with the
      same microphone, read the way you want books read. You can stop and continue another day.
    - The recordings are kept in `finetune\dataset\<voice name>\`.
@@ -181,6 +186,10 @@ arrow.
 - **Clone:** record yourself, or use a short recording of one speaker.
 - **From the PC:** a voice made on the PC (`.dtvoice`, see section 3) or a VoiceStudio export
   (`.ovsvoice`).
+- **Recordings for fine-tuning:** Voices → "Recordings for fine-tuning on the PC" → "Record
+  sentences" shows the same sentences as the PC, one at a time. Each take, and every voice
+  recording made for cloning, is kept with its text under a voice name. **Export** saves them
+  as `<name>.dtdata` (to Downloads or Google Drive), for the PC's fine-tune tab.
 
 **Vietnamese text.**
 

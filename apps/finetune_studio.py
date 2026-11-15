@@ -113,6 +113,9 @@ def split_sentences(text: str, shortest: int = 35, longest: int = 170) -> List[s
     return out
 
 
+PHONE_SENTENCES = ROOT / "android" / "app" / "src" / "main" / "assets" / "finetune_sentences.txt"
+
+
 def load_script(source: Optional[str] = None, limit: int = 400) -> List[str]:
     """The sentences to read: from a book or text file when given (its own style of prose), else the built-in ones."""
     if source and str(source).strip():
@@ -254,6 +257,51 @@ def import_reading(name: str, sentences: List[str], audio_path: str) -> tuple:
         except ValueError:
             skipped.append(n)   # in line with its sentence, but too short or too long to train on
     return saved, total / 60, skipped
+
+
+def passage_sentences(text: str) -> List[str]:
+    """The sentences of a passage, split at sentence ends only (no joining: each was read with a pause after it)."""
+    return [s.strip() for s in re.split(r"(?<=[.!?…])[\"')\]»”’]*\s+", " ".join(text.split())) if s.strip()]
+
+
+def import_dataset(path, name: Optional[str] = None) -> dict:
+    """Adds the recordings of a ``.dtdata`` file from the phone app (or a zip of the same layout).
+
+    ``name`` overrides the voice name stored in the file. Sentence takes are filed as they are; a "reading"
+    (the clone recorder's passage) is cut at its pauses like a long upload. Returns ``name``, ``saved``,
+    ``minutes`` and ``problems`` (one line per take left out, with the reason).
+    """
+    import tempfile
+    import zipfile
+    try:
+        archive = zipfile.ZipFile(str(path))
+    except zipfile.BadZipFile as e:
+        raise ValueError("Đây không phải file .dtdata của app điện thoại.") from e
+    with archive, tempfile.TemporaryDirectory(prefix="vieneu-dtdata-") as work:
+        try:
+            data = json.loads(archive.read("dataset.json").decode("utf-8"))
+            assert data.get("format") == "doc-truyen-dataset" and int(data.get("version", 0)) == 1
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("Đây không phải file .dtdata của app điện thoại.") from e
+        voice = safe_name(name or data.get("voice") or "")
+        saved, seconds, problems = 0, 0.0, []
+        for n, take in enumerate(data.get("takes", []), 1):
+            file, text, kind = Path(str(take.get("file", ""))).name, str(take.get("text", "")), take.get("kind", "sentence")
+            if not file or file not in archive.namelist():
+                problems.append(f"bản {n}: thiếu file âm thanh"); continue
+            target = Path(work) / file
+            target.write_bytes(archive.read(file))
+            try:
+                if kind == "reading":
+                    count, minutes, skipped = import_reading(voice, passage_sentences(text), str(target))
+                    saved += count; seconds += minutes * 60
+                    if skipped:
+                        problems.append(f"bản {n} (đoạn văn): bỏ qua câu {', '.join(map(str, skipped))} vì ngắn hơn 3 hoặc dài hơn 15 giây")
+                else:
+                    seconds += save_take(voice, text, str(target)); saved += 1
+            except ValueError as e:
+                problems.append(f"bản {n}: {e}")
+        return {"name": voice, "saved": saved, "minutes": seconds / 60, "problems": problems}
 
 
 def progress(name: str) -> tuple:

@@ -94,7 +94,7 @@
     <string name="voice_rename">Rename voice</string>
     <string name="record_title">Record your voice</string>
     <string name="record_default_name">My voice</string>
-    <string name="record_tips">Read the passage below aloud in your normal voice, steady and unhurried. Use a quiet room and hold the phone about 20 cm away. 20 to 30 seconds is best.</string>
+    <string name="record_tips">Read the passage below aloud in your normal voice, steady and unhurried. Use a quiet room and hold the phone about 20 cm away. 20 to 30 seconds is best. Pause for a moment after each sentence.</string>
     <string name="record_ready">Tap Start and read the passage.</string>
     <string name="record_recording">Recording… %1$.0f s</string>
     <string name="record_done">Recorded %1$.0f s. Listen, or record again.</string>
@@ -170,4 +170,20 @@
     <string name="app_theme">Light or dark</string>
     <string name="voice_add">Add the voice</string>
     <string name="voice_error_pc_model">This voice was made for another version of the phone model. Make it again in an up-to-date Windows app.</string>
+    <string name="training_section">Recordings for fine-tuning on the PC</string>
+    <string name="training_section_hint">For a voice that sounds closest to you, record 10 to 30 minutes of sentences here (or let the voice recordings above be kept), export them, and add the file in the Windows app: tab “🎓 Fine-tune giọng”, “📱 Nhập bản thu từ điện thoại”.</string>
+    <string name="training_record">Record sentences</string>
+    <string name="training_more">Record more</string>
+    <string name="training_export">Export</string>
+    <string name="training_exported">Saved. Copy the .dtdata file to the PC and add it in the fine-tune tab.</string>
+    <string name="training_export_failed">The file could not be saved there.</string>
+    <string name="training_title">Record for fine-tuning</string>
+    <string name="training_tips">Read each sentence exactly as written, in a steady voice, the way you want books read. Use a quiet room and the same distance from the phone. 100 to 300 sentences is best; you can stop and go on another day.</string>
+    <string name="training_progress">%1$d recordings · %2$.1f min</string>
+    <string name="training_ready">Tap Start, read the sentence, then Stop.</string>
+    <string name="training_take">Recorded %1$.0f s. Listen, record again, or save.</string>
+    <string name="training_too_short">Under 3 seconds: read a little slower and record again.</string>
+    <string name="training_save">Save and next</string>
+    <string name="training_skip">Skip</string>
+    <string name="training_all_done">Every sentence is recorded for this voice. Export them, or use another name.</string>
 </resources>

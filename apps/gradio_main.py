@@ -2347,6 +2347,14 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             )
                             ft_long = gr.Audio(label="Bản ghi âm dài", sources=["upload"], type="filepath")
                             btn_ft_long = gr.Button("📲 Cắt và lưu theo từng câu", variant="secondary")
+                        with gr.Accordion("📱 Nhập bản thu từ điện thoại (file .dtdata của app Doc truyen)", open=False):
+                            gr.Markdown(
+                                "Trong app điện thoại: **Giọng đọc → Bản thu để fine-tune trên máy tính → Thu âm từng câu**, rồi **Xuất** ra file `.dtdata` "
+                                "(lưu vào Tải xuống hoặc Google Drive) và chép sang máy tính. Bản thu giọng khi clone trên điện thoại cũng nằm trong file đó. "
+                                "Ô **Tên giọng** ở trên để trống thì dùng tên trong file."
+                            )
+                            ft_dtdata = gr.File(label="File .dtdata", file_types=[".dtdata", ".zip"], type="filepath")
+                            btn_ft_dtdata = gr.Button("📱 Thêm các bản thu này", variant="secondary")
                         ft_state = gr.State({"sentences": [], "at": 0})
                         ft_train_md = gr.Markdown()
 
@@ -2825,6 +2833,22 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             return _ft_view(name, state, note)
 
         btn_ft_long.click(_ft_long, inputs=[ft_name, ft_state, ft_long], outputs=[ft_state, ft_sentence, ft_progress, ft_audio, ft_train_md])
+
+        def _ft_dtdata(name, state, path):
+            from apps import finetune_studio as ft
+            if not path:
+                return [state, gr.update(), "⚠️ Hãy chọn một file .dtdata.", gr.update(), "", gr.update()]
+            try:
+                result = ft.import_dataset(path, (name or "").strip() or None)
+            except Exception as e:  # noqa: BLE001
+                return [state, gr.update(), f"⚠️ {e}", gr.update(), "", gr.update()]
+            note = f"✅ Đã thêm {result['saved']} bản thu ({result['minutes']:.1f} phút) cho giọng **{result['name']}**."
+            if result["problems"]:
+                note += "\n\nKhông dùng được:\n" + "\n".join(f"- {p}" for p in result["problems"][:20])
+            return [*_ft_view(result["name"], state, note), result["name"]]
+
+        btn_ft_dtdata.click(_ft_dtdata, inputs=[ft_name, ft_state, ft_dtdata],
+                            outputs=[ft_state, ft_sentence, ft_progress, ft_audio, ft_train_md, ft_name])
 
         def _ft_skip(name, state):
             return _ft_view(name, {"sentences": state.get("sentences", []), "at": int(state.get("at", 0)) + 1})

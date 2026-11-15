@@ -96,3 +96,42 @@ def test_phone_formats_are_read(tmp_path):
             out.mux(packet)
     wav, rate = ft.load_audio(path)
     assert rate == sr and 1.9 < len(wav) / sr < 2.2 and np.abs(wav).max() > 0.1
+
+
+def test_the_phone_and_the_pc_offer_the_same_sentences():
+    assert [l.strip() for l in ft.PHONE_SENTENCES.read_text(encoding="utf-8").splitlines() if l.strip()] == ft.load_script()
+
+
+def test_recordings_from_the_phone_are_added(tmp_path, monkeypatch):
+    import json, zipfile
+    monkeypatch.setattr(ft, "DATASETS", tmp_path / "datasets")
+    sr = 48000
+    rng = np.random.default_rng(2)
+    noise = lambda seconds: (0.003 * rng.normal(size=int(seconds * sr))).astype(np.float32)
+    def wav(parts):
+        path = tmp_path / f"w{len(list(tmp_path.glob('w*')))}.wav"
+        sf.write(path, np.concatenate(parts), sr, subtype="PCM_16")
+        return path
+    passage = "Hôm nay trời đẹp, tôi ngồi bên cửa sổ. Ngoài vườn chim hót líu lo trên cành cây cao. Bà tưới rau."
+    files = {
+        "0001.wav": wav([noise(0.3), speech(4, sr), noise(0.3)]),
+        "0002.wav": wav([noise(0.3), speech(1.5, sr), noise(0.3)]),                         # too short to train on
+        "0003.wav": wav([noise(0.5), speech(3.0, sr), noise(0.9), speech(4.0, sr), noise(0.9), speech(1.3, sr), noise(0.5)]),
+    }
+    dataset = {"format": "doc-truyen-dataset", "version": 1, "voice": "Giọng bố", "takes": [
+        {"file": "0001.wav", "text": "Câu thứ nhất của bố.", "kind": "sentence"},
+        {"file": "0002.wav", "text": "Câu ngắn.", "kind": "sentence"},
+        {"file": "0003.wav", "text": passage, "kind": "reading"},
+        {"file": "0009.wav", "text": "Mất file.", "kind": "sentence"}]}
+    package = tmp_path / "Giong bo.dtdata"
+    with zipfile.ZipFile(package, "w") as z:
+        z.writestr("dataset.json", json.dumps(dataset, ensure_ascii=False))
+        for name, path in files.items():
+            z.write(path, name)
+    result = ft.import_dataset(package)
+    assert result["name"] == "Giọng bố" and result["saved"] == 3        # one sentence and two of the passage's three
+    assert len(result["problems"]) == 3                                   # the short take, the passage's short sentence, the missing file
+    assert ft.progress("Giọng bố")[2] == {"Câu thứ nhất của bố.", "Hôm nay trời đẹp, tôi ngồi bên cửa sổ.", "Ngoài vườn chim hót líu lo trên cành cây cao."}
+    assert ft.import_dataset(package, "Tên khác")["name"] == "Tên khác"
+    with pytest.raises(ValueError):
+        ft.import_dataset(files["0001.wav"])

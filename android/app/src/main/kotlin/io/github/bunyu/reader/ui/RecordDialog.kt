@@ -58,7 +58,7 @@ fun RecordDialog(onDismiss: () -> Unit, onRecorded: (File) -> Unit) {
     }
     fun finish() {
         recorder.stop(); active = false
-        clip = recorder.save(File(workspace, "recording.wav"))
+        clip = recorder.save(File(workspace, RecordDialogFile))
     }
     // The recorder stops by itself at its limit.
     LaunchedEffect(seconds) { if (active && seconds >= VoiceRecorder.MAX_SECONDS) finish() }
@@ -106,7 +106,11 @@ fun RecordDialog(onDismiss: () -> Unit, onRecorded: (File) -> Unit) {
     )
 }
 
-private const val PASSAGE =
+/** The name of the clone recorder's file, by which a clone tells it came from here and so holds [PASSAGE]. */
+internal const val RecordDialogFile = "recording.wav"
+
+/** What the clone recorder asks the user to read; a recording of it is also kept for fine-tuning, with this text. */
+internal const val PASSAGE =
     "Hôm nay trời đẹp, tôi ngồi bên cửa sổ đọc sách. Ngoài vườn, mấy chú chim sẻ nhảy nhót trên cành bưởi, " +
     "còn bà ngoại đang tưới rau. Tôi nhớ những ngày thơ ấu ở quê, con đường đất đỏ dẫn ra bến sông và tiếng " +
     "gọi đò vọng lại mỗi chiều. Dù đã đi xa, những kỷ niệm ấy vẫn còn nguyên vẹn trong lòng tôi. Mỗi khi " +

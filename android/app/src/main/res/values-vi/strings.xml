@@ -94,7 +94,7 @@
     <string name="voice_rename">Đổi tên giọng</string>
     <string name="record_title">Thu giọng của bạn</string>
     <string name="record_default_name">Giọng của tôi</string>
-    <string name="record_tips">Đọc to đoạn văn bên dưới bằng giọng bình thường, đều và không vội. Nên ở phòng yên tĩnh, cầm điện thoại cách miệng khoảng 20 cm. Tốt nhất là 20 đến 30 giây.</string>
+    <string name="record_tips">Đọc to đoạn văn bên dưới bằng giọng bình thường, đều và không vội. Nên ở phòng yên tĩnh, cầm điện thoại cách miệng khoảng 20 cm. Tốt nhất là 20 đến 30 giây. Ngừng một chút sau mỗi câu.</string>
     <string name="record_ready">Bấm Bắt đầu rồi đọc đoạn văn.</string>
     <string name="record_recording">Đang thu… %1$.0f giây</string>
     <string name="record_done">Đã thu %1$.0f giây. Nghe lại hoặc thu lại.</string>
@@ -170,4 +170,20 @@
     <string name="app_theme">Sáng hoặc tối</string>
     <string name="voice_add">Thêm giọng</string>
     <string name="voice_error_pc_model">Giọng này được tạo cho một phiên bản khác của model điện thoại. Hãy tạo lại bằng app Windows mới nhất.</string>
+    <string name="training_section">Bản thu để fine-tune trên máy tính</string>
+    <string name="training_section_hint">Muốn có giọng giống bạn nhất, hãy thu 10 đến 30 phút đọc câu ở đây (các bản thu giọng ở trên cũng được giữ lại), xuất ra rồi thêm file vào app Windows: tab “🎓 Fine-tune giọng”, mục “📱 Nhập bản thu từ điện thoại”.</string>
+    <string name="training_record">Thu âm từng câu</string>
+    <string name="training_more">Thu thêm</string>
+    <string name="training_export">Xuất</string>
+    <string name="training_exported">Đã lưu. Chép file .dtdata sang máy tính và thêm vào tab fine-tune.</string>
+    <string name="training_export_failed">Không lưu được file vào chỗ đó.</string>
+    <string name="training_title">Thu âm để fine-tune</string>
+    <string name="training_tips">Đọc đúng từng chữ của câu, giọng đều, đúng kiểu bạn muốn nghe đọc sách. Phòng yên tĩnh, giữ điện thoại cách miệng như nhau. Tốt nhất 100 đến 300 câu; có thể dừng và thu tiếp hôm khác.</string>
+    <string name="training_progress">%1$d bản thu · %2$.1f phút</string>
+    <string name="training_ready">Bấm Bắt đầu, đọc câu, rồi bấm Dừng.</string>
+    <string name="training_take">Đã thu %1$.0f giây. Nghe lại, thu lại, hoặc lưu.</string>
+    <string name="training_too_short">Dưới 3 giây: hãy đọc chậm hơn một chút rồi thu lại.</string>
+    <string name="training_save">Lưu và sang câu tiếp</string>
+    <string name="training_skip">Bỏ qua</string>
+    <string name="training_all_done">Đã thu hết các câu cho giọng này. Hãy xuất ra, hoặc dùng tên khác.</string>
 </resources>

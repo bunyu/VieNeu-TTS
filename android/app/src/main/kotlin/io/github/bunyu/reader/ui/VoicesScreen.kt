@@ -65,6 +65,8 @@ import io.github.bunyu.reader.voice.VoiceBundle
 import io.github.bunyu.reader.voice.VoiceBundleException
 import io.github.bunyu.reader.voice.PcVoiceException
 import io.github.bunyu.reader.voice.PcVoiceFile
+import io.github.bunyu.reader.voice.TrainingTake
+import io.github.bunyu.reader.voice.TrainingTakes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,6 +97,20 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
     var busy by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<io.github.bunyu.reader.voice.ReaderVoice?>(null) }
+    /** The voice name the fine-tuning recorder is open for, or null when it is closed. */
+    var training by remember { mutableStateOf<String?>(null) }
+    var trainingName by remember { mutableStateOf("") }
+    val trainingSets by app.training.sets.collectAsState()
+    /** The set being saved as a .dtdata file, while the system's save dialog is open. */
+    var exporting by remember { mutableStateOf<String?>(null) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val name = exporting ?: return@rememberLauncherForActivityResult
+        exporting = null
+        if (uri != null) scope.launch {
+            problem = runCatching { context.contentResolver.openOutputStream(uri)?.use { app.training.export(name, it) } ?: error("unwritable") }
+                .fold({ R.string.training_exported }, { R.string.training_export_failed })
+        }
+    }
     /** The preset whose sample is being generated. */
     var sampling by remember { mutableStateOf<String?>(null) }
     val player = remember { mutableStateOf<MediaPlayer?>(null) }
@@ -172,6 +188,8 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                 if (!app.vieneu.canClone) app.vieneu.assets.download(ReleaseFile.CLONE, app.settings.value.allowMobileData)
                 val voice = app.voices.add(clip, name) { app.vieneu.enroll(it) }
                 app.settings.update { it.copy(voice = VoiceChoice.Cloned(voice.id)) }
+                // A recording made here was the passage read aloud, so its words are known: keep it for fine-tuning on the PC.
+                if (clip.name == RecordDialogFile) runCatching { app.training.add(name, PASSAGE, clip, TrainingTake.READING) }
             } catch (e: EnrolmentFailed) { problem = if (e.reason == "silent") R.string.voice_error_silent else R.string.voice_error_short }
             catch (e: DownloadFailed) { problem = if (e.reason == "wifi") R.string.engine_wifi else if (e.reason == "storage") R.string.engine_storage else R.string.voice_error_download }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -189,9 +207,40 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) recording = true
         else microphone.launch(Manifest.permission.RECORD_AUDIO)
     }
+    val trainingMicrophone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) training = trainingName else problem = R.string.record_permission
+    }
+    fun recordTraining(name: String) {
+        problem = null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) training = name
+        else { training = null; trainingName = name; trainingMicrophone.launch(Manifest.permission.RECORD_AUDIO) }
+    }
 
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_voices)) }) }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Needs no voice model: the recordings are for the PC.
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(stringResource(R.string.training_section), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.training_section_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 6.dp))
+                        for (set in trainingSets) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(set.name)
+                                Text(stringResource(R.string.training_progress, set.takes.size, set.seconds / 60), style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton({ recordTraining(set.name) }) { Icon(painterResource(R.drawable.ic_voice), stringResource(R.string.training_more)) }
+                            TextButton({ exporting = set.name; save.launch(set.name + TrainingTakes.SUFFIX) }) { Text(stringResource(R.string.training_export)) }
+                            IconButton({ scope.launch { app.training.delete(set.name) } }) { Icon(Icons.Filled.Delete, stringResource(R.string.delete)) }
+                        }
+                        OutlinedButton(onClick = { recordTraining("") }, modifier = Modifier.padding(top = 6.dp)) {
+                            Icon(painterResource(R.drawable.ic_voice), null); Text(stringResource(R.string.training_record))
+                        }
+                    }
+                }
+            }
             val list = presets
             if (list == null) item {
                 Card(Modifier.fillMaxWidth()) {
@@ -258,6 +307,7 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
         recording = false
         pending = clip to context.getString(R.string.record_default_name)
     }
+    training?.let { name -> TrainingDialog(name, onDismiss = { training = null }) }
     renaming?.let { voice ->
         RenameDialog(voice.name, onDismiss = { renaming = null }) { name ->
             renaming = null

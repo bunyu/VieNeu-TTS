@@ -29,7 +29,9 @@ The phone has run almost none of this branch. Ask the user to install
    then from a Drive folder link) and listen to the joins between paragraphs.
 3. Import a `.dtvoice` made by the PC (Voices → From a file); listen to a few of the 20
    extra built-in voices.
-4. Language switch, light/dark, bookmarks, "Keep the voice ready while reading".
+4. Record a few sentences under Voices → "Recordings for fine-tuning on the PC", export the
+   `.dtdata` (Downloads, then Drive) and add it in the PC's fine-tune tab.
+5. Language switch, light/dark, bookmarks, "Keep the voice ready while reading".
 
 Measured on the phone so far: Nano makes speech at 1.8–2× listening speed in normal mode
 and 3–3.5× in fast mode. Before the first-sound changes the user heard a 1–2 s wait when
@@ -113,7 +115,9 @@ pressing play where nothing was ready; after them, not yet measured.
   `VietnameseText` / `VietnameseNumbers`, `PauseRules` / `PauseText`.
 - `voice/`: `ReaderVoices` (`print.f32` = 192 speaker floats then 50 × 256 style floats,
   little-endian, plus a preview clip), `VoiceBundle` (VoiceStudio), `PcVoiceFile`
-  (`.dtvoice`).
+  (`.dtvoice`), `TrainingTakes` (recordings kept for fine-tuning, `filesDir/training/<hash of
+  the name>/`; recorded in `ui/TrainingDialog.kt`, 3–15 s per take; a clone made from the
+  recorder also keeps its clip as a "reading").
 - `ui/`: Compose screens; `Theme` (`AppTheme`, `LocalAppDark`, reading themes).
 - Strings: `res/values/strings.xml` (English) and `res/values-vi/strings.xml`; every new
   string needs both. The app label is "Doc truyen" (without accents, as the user wrote it).
@@ -152,7 +156,14 @@ pressing play where nothing was ready; after them, not yet measured.
 - **PC audio books** are `books/<id>/prepared.json` + `prepared/NNNN.<ext>`; their pieces are
   the paragraphs of the sync files, each a `Clip` played as a clipped ExoPlayer item (MP3
   with index seeking). Parts arrive in any order; the reader's place is kept as "this
-  paragraph of that part". Such books need no voice model.
+  paragraph of that part". Such books need no voice model. Files are grouped into books by
+  the `book` title in their sync files (not by folder) and ordered by `index`, which
+  counts files, not chapters: a book must be made with one "chapters per file" setting, or
+  a later part with the same index replaces an earlier one. Two books with the same title
+  merge.
+- **Deleting a book** removes `books/<id>/` whole: text, place, bookmarks, generated audio,
+  PC audio. Voices, the model, voice samples and fine-tuning recordings stay; the
+  first-sound scraps in `cacheDir/early-parts` go at the next playback.
 - **Drive folders** are listed from `https://drive.google.com/embeddedfolderview?id=<id>`
   (blocks `class="flip-entry"`, title in `flip-entry-title`, link `/file/d/<id>` or
   `/folders/<id>`), one level of sub-folders, sync files first so known parts are skipped.
@@ -173,6 +184,14 @@ pressing play where nothing was ready; after them, not yet measured.
   `{"format": "vieneu-sync", "version": 1, "book", "index", "of", "audio", "seconds",
   "chapters": [{"title", "segments": [[start_s, end_s, "paragraph text"], …]}]}`. A
   segment spans the paragraph and its pause; the book is matched by its title.
+- **`.dtdata`** (phone `TrainingTakes.export` → `apps.finetune_studio.import_dataset`): a zip of
+  `dataset.json` `{"format": "doc-truyen-dataset", "version": 1, "voice", "takes": [{"file",
+  "text", "kind": "sentence" | "reading"}]}` and the WAV takes (48 kHz, 16-bit mono, as
+  `VoiceRecorder` writes them). A "reading" is the clone recorder's passage (`PASSAGE` in
+  `RecordDialog.kt`), cut on the PC at its pauses against its sentences
+  (`passage_sentences`, then `import_reading`). The sentence list is one file,
+  `android/app/src/main/assets/finetune_sentences.txt`, equal to `BUILT_IN` in
+  `finetune_studio.py` (a test keeps them equal).
 - **`.dtvoice`** (`apps/phone_voice.py` → `PcVoiceFile`): a zip of `voice.json`
   `{"format": "doc-truyen-voice", "version": 1, "name", "description", "release",
   "speaker": [192], "style": [50 × [256]]}` and `sample.wav` (Nano reading a check line).

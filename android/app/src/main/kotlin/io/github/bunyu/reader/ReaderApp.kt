@@ -20,12 +20,14 @@ class ReaderApp : Application() {
     val settings by lazy { ReaderSettings(this) }
     val library by lazy { Library(this) }
     val voices by lazy { ReaderVoices(File(filesDir, "voices")) }
+    /** The user's recordings kept with their text, for fine-tuning a voice on the PC. */
+    val training by lazy { io.github.bunyu.reader.voice.TrainingTakes(File(filesDir, "training")) }
     val vieneu by lazy { VieNeu(this) }
     val narration by lazy { Narration(this, library, settings, Renderer(vieneu, voices)) }
 
     override fun onCreate() {
         super.onCreate()
-        scope.launch { library.refresh(); voices.refresh() }
+        scope.launch { library.refresh(); voices.refresh(); training.refresh() }
     }
 
     companion object {
