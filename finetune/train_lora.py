@@ -108,11 +108,13 @@ def main() -> None:
     model.config.use_cache = False
     for p in model.parameters():
         p.requires_grad_(False)
-    if args.grad_checkpoint:
-        model.semantic_backbone.gradient_checkpointing_enable()
     unfreeze = [s.strip() for s in args.unfreeze.split(",") if s.strip()]
     peft_model = attach_lora(model, r=args.r, alpha=args.alpha, dropout=args.dropout,
                              target=args.target, unfreeze=unfreeze)
+    if args.grad_checkpoint:
+        # After attaching LoRA: switched on before, PEFT prepares for it by hooking the input embeddings,
+        # which this model does not expose. The non-reentrant form needs no gradient on the inputs anyway.
+        model.semantic_backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     n_train = sum(p.numel() for p in trainable_parameters(model))
     n_all = sum(p.numel() for p in model.parameters())
     print(f"trainable params: {n_train/1e6:.2f}M / {n_all/1e6:.1f}M ({100*n_train/n_all:.2f}%)  target={args.target} unfreeze={unfreeze}")

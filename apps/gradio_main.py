@@ -125,6 +125,18 @@ filtered_backbones["VieNeu-TTS-v3-Nano (preview)"] = {
     )
 }
 
+# Models fine-tuned on this PC for one voice (finetune/output/<voice>/merged): PyTorch, so GPU only.
+if HAS_GPU:
+    try:
+        from apps.finetune_studio import merged_models, model_label
+        for _run, _folder in merged_models():
+            filtered_backbones[model_label(_run)] = {
+                "repo": _folder, "precision": "fp32", "supports_streaming": False,
+                "description": f"🎓 v3 Turbo đã fine-tune cho giọng “{_run}”. Sau khi nạp, chọn giọng “{_run}” trong danh sách giọng mẫu.",
+            }
+    except Exception as _e:  # noqa: BLE001
+        print(f"⚠️ Không đọc được các model fine-tune: {_e}")
+
 # GPU-only extras. On GPU the default is VieNeu-TTS-v2 (GPU); v3 Turbo stays the
 # default (and only option) on CPU machines (the v2/v1 GGUF CPU builds were removed).
 if HAS_GPU:
@@ -284,6 +296,7 @@ def autoload_model(*load_inputs):
     yield from load_model(*load_inputs)
 
 
+LAB_MAX = 6  # clone candidates shown side by side
 VOICE_SAMPLE_TEXT = "Xin chào, tôi sẽ đọc sách cho bạn nghe bằng giọng này. Chúc bạn có những phút giây thật thư giãn."
 _voice_samples: dict = {}
 
@@ -2265,6 +2278,50 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                                 user_voice_dd = gr.Dropdown(choices=[], value=None, show_label=False, container=False, scale=4)
                                 btn_delete_voice = gr.Button("🗑️ Xoá", variant="secondary", size="sm", scale=0, min_width=110)
 
+                        with gr.Accordion("🔬 Tìm đoạn mẫu tốt nhất từ một bản thu dài (v3 Turbo)", open=False):
+                            gr.Markdown(
+                                "Bản clone chỉ dùng **8 giây** của audio mẫu, và 8 giây đó quyết định cả chất giọng lẫn cách đọc. "
+                                "Tải lên một bản thu **30 giây đến vài phút** (một người, đọc đúng kiểu bạn muốn nghe): app tự cắt ra vài đoạn 8 giây "
+                                "nhiều tiếng nói nhất, clone từng đoạn, cho mỗi bản clone đọc cùng một câu và chấm **độ giống** với giọng trong cả bản thu. "
+                                "Điểm số chỉ để xếp thứ tự; hãy nghe rồi chọn."
+                            )
+                            lab_audio = gr.Audio(label="Bản thu dài của một giọng (.wav / .mp3)", type="filepath")
+                            with gr.Row():
+                                lab_count = gr.Slider(2, LAB_MAX, value=4, step=1, label="Số đoạn thử")
+                                lab_both = gr.Checkbox(value=False, label="Thử cả bật và tắt khử nhiễu", info="Gấp đôi số bản clone; hữu ích khi bản thu vốn đã sạch.")
+                            btn_lab = gr.Button("🔬 Clone và so sánh", variant="primary")
+                            lab_status = gr.Markdown()
+                            lab_players = [gr.Audio(visible=False, interactive=False) for _ in range(LAB_MAX)]
+                            lab_state = gr.State([])
+                            with gr.Row():
+                                lab_pick = gr.Dropdown(choices=[], value=None, label="Bản muốn lưu", scale=3)
+                                lab_name = gr.Textbox(label="Tên giọng", placeholder="VD: Giọng tôi (bản 2)", scale=2)
+                            btn_lab_save = gr.Button("💾 Lưu bản này thành giọng mẫu", variant="secondary", size="sm", scale=0, min_width=220)
+                            lab_save_status = gr.Markdown(visible=False)
+
+                    # --- TAB: FINE-TUNE (record a dataset sentence by sentence; training runs outside the app) ---
+                    with gr.Tab("🎓 Fine-tune giọng", id="finetune_tab"):
+                        gr.Markdown(
+                            "Fine-tune dạy model **một giọng** từ 10–30 phút thu âm, bám giọng sát hơn hẳn clone 8 giây. Làm ba bước:\n\n"
+                            "1. **Thu âm ở đây**: app hiện từng câu, bạn đọc và lưu. Nên có **100–300 câu** (mỗi câu 3–15 giây), phòng yên tĩnh, "
+                            "cùng một micro, đọc đúng kiểu bạn muốn model đọc sách. Có thể nghỉ và thu tiếp vào hôm khác.\n"
+                            "2. **Đóng app này**, rồi chạy `finetune_windows.bat \"Tên giọng\"` (card 6 GB không chứa nổi cả app lẫn việc train).\n"
+                            "3. **Mở lại app**: model mới xuất hiện trong danh sách model với tên có 🎓."
+                        )
+                        with gr.Row():
+                            ft_name = gr.Textbox(label="Tên giọng", placeholder="VD: Giong toi", scale=2)
+                            ft_source = gr.Textbox(label="Lấy câu từ sách hoặc văn bản (.epub / .txt); để trống = 40 câu có sẵn", scale=3,
+                                                   placeholder=r"VD: D:\Sach\Truyen.epub (đọc chính loại văn bạn muốn nghe)")
+                        btn_ft_start = gr.Button("▶ Bắt đầu / thu tiếp", variant="secondary")
+                        ft_progress = gr.Markdown()
+                        ft_sentence = gr.Textbox(label="Hãy đọc câu này", lines=3, interactive=False)
+                        ft_audio = gr.Audio(label="Bản thu của câu này", sources=["microphone"], type="filepath")
+                        with gr.Row():
+                            btn_ft_save = gr.Button("💾 Lưu và sang câu tiếp", variant="primary")
+                            btn_ft_skip = gr.Button("⏭ Bỏ qua câu này", variant="secondary")
+                        ft_state = gr.State({"sentences": [], "at": 0})
+                        ft_train_md = gr.Markdown()
+
                 # Global Generation Settings
                 with gr.Row():
                     use_batch = gr.Checkbox(
@@ -2599,6 +2656,93 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
             inputs=[custom_audio, clone_save_name, clone_save_desc, denoise_checkbox],
             outputs=[clone_save_status, user_voice_dd, voice_select, srt_voice, *speaker_voice_dds],
         )
+
+        def _lab_run(audio_path, count, both):
+            hidden = [gr.update(visible=False)] * LAB_MAX
+            if not model_loaded or tts is None:
+                return ["⚠️ Vui lòng nạp model trước!", [], gr.update(choices=[], value=None), *hidden]
+            if not audio_path:
+                return ["⚠️ Hãy tải lên một bản thu.", [], gr.update(choices=[], value=None), *hidden]
+            from apps.voice_lab import compare, label
+            try:
+                results = compare(tts, audio_path, tempfile.mkdtemp(prefix="vieneu-lab-"), count=int(count), both_denoise=bool(both))[:LAB_MAX]
+            except Exception as e:  # noqa: BLE001
+                return [f"❌ {e}", [], gr.update(choices=[], value=None), *hidden]
+            labels = [label(i, r) for i, r in enumerate(results, 1)]
+            players = [gr.update(value=r["sample"], label=text, visible=True) for r, text in zip(results, labels)]
+            status = (f"Đã clone {len(results)} bản, xếp từ giống nhất. Mỗi bản đọc cùng một đoạn văn: hãy nghe và chọn bản bạn thích, "
+                      "rồi đặt tên và lưu ở dưới.")
+            return [status, results, gr.update(choices=labels, value=labels[0]), *players, *hidden[len(players):]]
+
+        btn_lab.click(lambda: "⏳ Đang clone và đọc thử từng đoạn…", outputs=[lab_status]).then(
+            _lab_run, inputs=[lab_audio, lab_count, lab_both], outputs=[lab_status, lab_state, lab_pick, *lab_players])
+
+        def _lab_save(results, picked, name):
+            no_change = [gr.update()] * (2 + MAX_SPEAKERS)
+            from apps.voice_lab import label
+            chosen = next((r for i, r in enumerate(results or [], 1) if label(i, r) == picked), None)
+            if chosen is None:
+                return [gr.update(value="⚠️ Hãy chạy so sánh và chọn một bản trước.", visible=True), gr.update(), *no_change]
+            try:
+                v_id = save_user_voice(tts, name, chosen["clip"], denoise=bool(chosen["denoise"]))
+            except Exception as e:  # noqa: BLE001
+                return [gr.update(value=f"❌ {e}", visible=True), gr.update(), *no_change]
+            _refresh_voice_caches()
+            return [gr.update(value=f"✅ Đã lưu giọng **{v_id}**.", visible=True), _user_voice_choices(), *_voice_list_updates(select_voice=v_id)]
+
+        btn_lab_save.click(_lab_save, inputs=[lab_state, lab_pick, lab_name],
+                           outputs=[lab_save_status, user_voice_dd, voice_select, srt_voice, *speaker_voice_dds])
+
+        # --- Fine-tune: record one sentence at a time ---
+        def _ft_view(name, state, note=""):
+            from apps import finetune_studio as ft
+            try:
+                count, minutes, done = ft.progress(name)
+                safe = ft.safe_name(name)
+            except ValueError as e:
+                return [state, "", f"⚠️ {e}", gr.update(), ""]
+            sentences, at = state.get("sentences", []), int(state.get("at", 0))
+            while at < len(sentences) and " ".join(sentences[at].split()) in done:
+                at += 1
+            state = {"sentences": sentences, "at": at}
+            left = len(sentences) - at
+            lines = [note] if note else []
+            lines.append(f"**Đã thu {count} câu · {minutes:.1f} phút** (nên đạt 10–30 phút). Còn {max(left, 0)} câu trong danh sách này.")
+            if sentences and left <= 0:
+                lines.append("Đã hết câu trong danh sách. Muốn thu thêm, nhập đường dẫn một cuốn sách ở trên rồi bấm **Bắt đầu / thu tiếp**.")
+            train = (f"**Khi đã đủ dữ liệu:** đóng cửa sổ app này, mở thư mục `{Path(__file__).resolve().parents[1]}` và chạy "
+                     f"`finetune_windows.bat \"{safe}\"`. Dữ liệu nằm ở `{ft.dataset_dir(name)}`.") if count else ""
+            return [state, sentences[at] if 0 <= at < len(sentences) else "", "\n\n".join(lines), None, train]
+
+        def _ft_start(name, source, state):
+            from apps import finetune_studio as ft
+            try:
+                ft.safe_name(name)
+                sentences = ft.load_script(source)
+            except Exception as e:  # noqa: BLE001
+                return [state, "", f"⚠️ {e}", gr.update(), ""]
+            return _ft_view(name, {"sentences": sentences, "at": 0})
+
+        def _ft_save(name, state, audio_path):
+            from apps import finetune_studio as ft
+            sentences, at = state.get("sentences", []), int(state.get("at", 0))
+            if not (0 <= at < len(sentences)):
+                return _ft_view(name, state, "⚠️ Bấm **Bắt đầu / thu tiếp** để lấy câu.")
+            try:
+                seconds = ft.save_take(name, sentences[at], audio_path)
+            except Exception as e:  # noqa: BLE001
+                view = _ft_view(name, state, f"⚠️ {e}")
+                view[3] = gr.update()  # keep the take on screen so it can be heard or redone
+                return view
+            return _ft_view(name, state, f"✅ Đã lưu ({seconds:.1f} giây).")
+
+        def _ft_skip(name, state):
+            return _ft_view(name, {"sentences": state.get("sentences", []), "at": int(state.get("at", 0)) + 1})
+
+        _ft_outputs = [ft_state, ft_sentence, ft_progress, ft_audio, ft_train_md]
+        btn_ft_start.click(_ft_start, inputs=[ft_name, ft_source, ft_state], outputs=_ft_outputs)
+        btn_ft_save.click(_ft_save, inputs=[ft_name, ft_state, ft_audio], outputs=_ft_outputs)
+        btn_ft_skip.click(_ft_skip, inputs=[ft_name, ft_state], outputs=_ft_outputs)
 
         def _delete_voice(name):
             no_change = [gr.update()] * (2 + MAX_SPEAKERS)

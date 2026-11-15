@@ -83,6 +83,31 @@ Windows app:
   Each paragraph is now spoken by itself, so the paragraph pause really falls between
   paragraphs. Audio made earlier has no sync file; delete a file to have it made again.
 
+Windows app, better cloned voices (2026-11-15):
+
+- **Clone comparison** (`apps/voice_lab.py`; Voice Cloning tab → "🔬 Tìm đoạn mẫu tốt
+  nhất"). From one recording of 30 s or more it cuts up to six 8-second stretches that
+  are nearly all speech (they may overlap by half), clones each, optionally with and
+  without the denoiser, has each read the same passage, and ranks them by cosine
+  similarity of speaker vectors against up to a minute of the whole recording. Checked
+  with the real model on a 20 s recording of a built-in voice: clones scored 0.92–0.94,
+  a different speaker 0.38. A short recording gives a single candidate.
+- **Fine-tuning** (`apps/finetune_studio.py`; tab "🎓 Fine-tune giọng"). The tab shows
+  one sentence at a time (40 built-in ones, or sentences taken from a book), records it,
+  trims the silence and files it as `finetune/dataset/<voice>/raw_audio/NNNN.wav` with
+  `metadata.csv`; recording can stop and resume. Training runs with the app closed:
+  `finetune_windows.bat "<voice>"` installs peft / accelerate / pyarrow once, then runs
+  prepare_dataset → train_lora (float32, batch 2 × 8 and gradient checkpointing on cards
+  older than RTX 30 or under 7 GB) → merge_lora **in its own process** (merging inside
+  the training process ran out of the PC's 8 GB) → make_voice. The app lists each
+  `finetune/output/<voice>/merged` as a model named "VieNeu-TTS-v3-Turbo 🎓 <voice>".
+  Fixed in `train_lora.py`: `--grad-checkpoint` crashed in PEFT (checkpointing is now
+  switched on after LoRA is attached, non-reentrant).
+- Checked on the GTX 1060 with a 20-clip trial dataset, next to the running app: about
+  10 s per step of 16 clips (so 200 sentences × 3 epochs ≈ 7 minutes), `acc_cb0` 0.41,
+  merge 2 min 40 s, the merged model loads (34 s) and speaks with its voice. Nobody has
+  yet trained on a real recorded voice or listened to the result.
+
 Not done:
 
 - **v3 Turbo on the phone** (asked for: a choice between Nano and Turbo). Not started.
