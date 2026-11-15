@@ -142,17 +142,27 @@ class Library(private val context: Context) {
                 File(staging, File(name ?: "file-$n").name).outputStream().use { input.copyTo(it, 262_144) }
             }
         }
+        0
     }
 
     /** The same from links, one file each: audio files and sync files, or a zip of them. */
-    suspend fun importPreparedLinks(links: List<String>): PreparedAudio.Result = staged { staging -> links.forEach { PreparedAudio.download(it, staging) } }
+    /**
+     * The same from links: one file each (audio files and sync files, or a zip of them), or a shared Google
+     * Drive folder, which is searched for all of them. [progress] counts the files of a folder as they arrive.
+     */
+    suspend fun importPreparedLinks(links: List<String>, progress: (Int, Int) -> Unit = { _, _ -> }): PreparedAudio.Result = staged { staging ->
+        links.sumOf { link ->
+            val folder = PreparedAudio.driveFolder(link)
+            if (folder != null) PreparedAudio.fetchDriveFolder(root, folder, staging, progress) else { PreparedAudio.download(link, staging); 0 }
+        }
+    }
 
-    private suspend fun staged(fill: (File) -> Unit): PreparedAudio.Result = withContext(Dispatchers.IO) {
+    private suspend fun staged(fill: (File) -> Int): PreparedAudio.Result = withContext(Dispatchers.IO) {
         // Inside the books folder so the audio can be moved, not copied a second time.
         val staging = File(root, ".staging-" + UUID.randomUUID()).apply { mkdirs() }
         try {
-            fill(staging)
-            mutex.withLock { PreparedAudio.import(root, staging) }
+            val alreadyThere = fill(staging)
+            mutex.withLock { PreparedAudio.import(root, staging) }.let { PreparedAudio.Result(it.books, it.parts, it.withoutAudio, alreadyThere) }
         } finally { staging.deleteRecursively(); refresh() }
     }
 

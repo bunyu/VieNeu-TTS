@@ -42,6 +42,17 @@ class ChunkerTest {
         assertEquals(text, quick.joinToString(" ") { it.text })
     }
 
+    @Test fun quickStartGrowsFromCallToCall() {
+        val text = (1..12).joinToString(" ") { "Đây là câu văn số $it của đoạn." }   // sentences of about 27 characters
+        val quick = Chunker.calls(text, maxChars = 140, quickStart = true)
+        // One call is made while the one before it plays, so the sizes climb instead of jumping to the full size.
+        assertTrue(quick[0].text.length in 30..60)
+        assertTrue(quick[1].text.length in 40..70)
+        assertTrue(quick[2].text.length > quick[1].text.length)
+        assertTrue(quick.all { it.text.length <= 140 })
+        assertEquals(text, quick.joinToString(" ") { it.text })
+    }
+
     @Test fun quickStartJoinsVeryShortOpeningSentences() {
         val quick = Chunker.calls("Ừ. Thế à? Anh không biết chuyện ấy đâu. Mọi người đều đã về từ chiều hôm qua, chỉ còn mình tôi ở lại trông nhà.", maxChars = 140, quickStart = true)
         assertEquals("Ừ. Thế à? Anh không biết chuyện ấy đâu.", quick.first().text)

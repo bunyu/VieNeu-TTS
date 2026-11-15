@@ -71,6 +71,43 @@ class PreparedAudioTest {
         assertTrue("nothing escapes the staging folder", !File(staging.parentFile, "001 - Một.opus.sync.json").exists())
     }
 
+    @Test fun aSharedDriveFolderIsSearchedAndKnownPartsAreSkipped() {
+        assertEquals("1AbC_dEfGhIjKlMnOp-12345", PreparedAudio.driveFolder("https://drive.google.com/drive/folders/1AbC_dEfGhIjKlMnOp-12345?usp=sharing"))
+        assertEquals("1AbC_dEfGhIjKlMnOp-12345", PreparedAudio.driveFolder("https://drive.google.com/drive/u/0/folders/1AbC_dEfGhIjKlMnOp-12345"))
+        assertEquals(null, PreparedAudio.driveFolder("https://drive.google.com/file/d/1AbC_dEfGhIjKlMnOp-12345/view"))
+
+        // The shape of Drive's embedded folder list: one block per entry, a link and a title in each.
+        fun entry(id: String, name: String, folder: Boolean = false) = """<div class="flip-entry" id="entry-$id" tabindex="0" role="link"><div class="flip-entry-info">""" +
+            """<a href="https://drive.google.com/${if (folder) "drive/folders/$id" else "file/d/$id/view?usp=drive_web"}" target="_blank"><div class="flip-entry-visual"><img src="x"/></div>""" +
+            """<div class="flip-entry-title">$name</div></a></div></div>"""
+        val listed = PreparedAudio.parseDriveFolder("<html><body>" + entry("file-id-0000001", "001 - M&#39;ột &amp; Hai.opus") + entry("folder-id-000002", "phần sau", folder = true) + "</body></html>")
+        assertEquals(listOf("file-id-0000001" to "001 - M'ột & Hai.opus", "folder-id-000002" to "phần sau"), listed.map { it.id to it.name })
+        assertEquals(listOf(false, true), listed.map { it.folder })
+
+        // The library already has part 2; the folder holds parts 1 and 2, a picture, and part 3 in a sub-folder.
+        val root = temp.newFolder("books")
+        PreparedAudio.import(root, stage("002 - Ba.opus" to "audio-2", "002 - Ba.opus.sync.json" to sync(2, "002 - Ba.opus", "Ba")))
+        val content = mapOf(
+            "a1" to ("001 - Một.opus" to "audio-1"), "s1" to ("001 - Một.opus.sync.json" to sync(1, "001 - Một.opus", "Một")),
+            "a2" to ("002 - Ba.opus" to "audio-2"), "s2" to ("002 - Ba.opus.sync.json" to sync(2, "002 - Ba.opus", "Ba")),
+            "p" to ("bia.jpg" to "x"), "a3" to ("003 - Năm.opus" to "audio-3"), "s3" to ("003 - Năm.opus.sync.json" to sync(3, "003 - Năm.opus", "Năm")))
+        fun entries(vararg ids: String) = ids.map { PreparedAudio.DriveEntry(it, content.getValue(it).first, false) }
+        val fetched = mutableListOf<String>()
+        val counts = mutableListOf<Pair<Int, Int>>()
+        val staging = temp.newFolder()
+        val skipped = PreparedAudio.fetchDriveFolder(root, "top", staging, progress = { done, total -> counts += done to total },
+            list = { if (it == "top") entries("a1", "s1", "a2", "s2", "p") + PreparedAudio.DriveEntry("sub", "phần sau", true) else entries("a3", "s3") },
+            fetch = { entry, into -> fetched += entry.name; File(into, entry.name).apply { writeText(content.getValue(entry.id).second) } })
+        assertEquals(1, skipped)
+        assertEquals(listOf("001 - Một.opus.sync.json", "002 - Ba.opus.sync.json", "003 - Năm.opus.sync.json", "001 - Một.opus", "003 - Năm.opus"), fetched)
+        assertEquals(5 to 5, counts.last())
+        val result = PreparedAudio.import(root, staging)
+        assertEquals(2, result.parts); assertEquals(0, result.withoutAudio)
+        val book = json.decodeFromString(PreparedBook.serializer(), File(File(root, result.books.single()), "prepared.json").readText())
+        assertEquals(listOf(1, 2, 3), book.parts.map { it.index })
+        assertThrows(LinkFailed::class.java) { PreparedAudio.fetchDriveFolder(root, "empty", temp.newFolder(), list = { emptyList() }) }
+    }
+
     @Test fun shareLinksBecomeDownloadLinks() {
         val drive = "https://drive.usercontent.google.com/download?id=1AbC_dEfGhIjKlMnOp-12345&export=download&confirm=t"
         assertEquals(drive, PreparedAudio.directLink(" https://drive.google.com/file/d/1AbC_dEfGhIjKlMnOp-12345/view?usp=sharing "))

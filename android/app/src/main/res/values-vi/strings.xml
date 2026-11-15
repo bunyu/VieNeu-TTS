@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Đọc sách VieNeu</string>
+    <string name="app_name">Doc truyen</string>
     <string name="tab_library">Thư viện</string>
     <string name="tab_voices">Giọng đọc</string>
     <string name="tab_settings">Cài đặt</string>
@@ -153,9 +153,19 @@
     <string name="fast_suggest">Tạo giọng chậm hơn tốc độ nghe. Bật tạo giọng nhanh hơn</string>
     <string name="prepared_add">Thêm audio làm sẵn trên máy tính</string>
     <string name="prepared_link">Lấy audio làm sẵn từ đường link</string>
-    <string name="prepared_link_hint">Mỗi dòng một link: từng file audio và file .sync.json nằm cạnh nó, hoặc một file .zip chứa tất cả. File trên Google Drive phải được chia sẻ cho “Bất kỳ ai có đường liên kết”.</string>
+    <string name="prepared_link_hint">Dán link của một thư mục Google Drive, app sẽ tự tìm mọi file audio và file .sync.json trong đó. Hoặc dán mỗi dòng một link: từng file audio và file .sync.json của nó, hay một file .zip chứa chúng. Thư mục hoặc file phải được chia sẻ cho “Bất kỳ ai có đường liên kết”.</string>
     <string name="prepared_done">Đã thêm %1$d file audio.</string>
     <string name="prepared_none">Chưa thêm được gì. Mỗi file audio cần file .sync.json được tạo cạnh nó: hãy chọn cả hai.</string>
     <string name="prepared_failed">Không lấy được audio. Hãy kiểm tra link và quyền chia sẻ của file.</string>
     <string name="download">Tải về</string>
+    <string name="ready_while_reading">Chuẩn bị sẵn giọng đọc khi đang đọc</string>
+    <string name="ready_while_reading_hint">Tạo sẵn các đoạn ở chỗ bạn đang đọc để bấm nghe là có tiếng ngay. Tốn một ít pin mỗi lần bạn dừng cuộn.</string>
+    <string name="prepared_files">File audio</string>
+    <string name="prepared_from_link">Link audio</string>
+    <string name="prepared_progress">Đang tải: %1$d/%2$d file</string>
+    <string name="prepared_nothing_new">Không có gì mới: sách đã có đủ các file audio trong thư mục đó.</string>
+    <string name="interface_title">Giao diện</string>
+    <string name="language">Ngôn ngữ</string>
+    <string name="language_phone">Theo điện thoại</string>
+    <string name="app_theme">Sáng hoặc tối</string>
 </resources>

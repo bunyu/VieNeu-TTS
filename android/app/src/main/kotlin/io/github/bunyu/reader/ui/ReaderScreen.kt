@@ -294,7 +294,7 @@ private fun progress(state: NarrationState, book: OpenBook) =
 private fun ReadingWindow(settings: Settings, immersive: Boolean) {
     val view = LocalView.current
     val window = (view.context as? Activity)?.window ?: return
-    val systemDark = isSystemInDarkTheme()
+    val systemDark = LocalAppDark.current
     val dark = settings.theme.isDark(systemDark)
     DisposableEffect(immersive, dark, settings.brightness, settings.keepScreenOn) {
         val controller = WindowCompat.getInsetsController(window, view)

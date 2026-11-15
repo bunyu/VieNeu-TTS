@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -138,10 +139,10 @@ class Narration(private val context: Context, private val library: Library, priv
         scope.launch { settings.flow.collect { applyAudio(it) } }
         // With listening hidden the book is only read: nothing plays and no audio is prepared (unless the whole book was asked for).
         scope.launch {
-            settings.flow.map { it.listening }.distinctUntilChanged().collect { on ->
+            settings.flow.map { it.listening to it.readyWhileReading }.distinctUntilChanged().collect { (on, _) ->
                 if (book == null) return@collect
-                if (on) reload(position, play = false)
-                else { player.playWhenReady = false; if (!mutable.value.preparingAll) renderJob?.cancel() }
+                if (!on) player.playWhenReady = false
+                reload(position, play = false)
             }
         }
         scope.launch { renderer.speed.collect { mutable.value = mutable.value.copy(speed = it) } }
@@ -181,7 +182,9 @@ class Narration(private val context: Context, private val library: Library, priv
     fun play() {
         if (book == null) return
         mutable.value = mutable.value.copy(error = null, finished = false)
-        if (renderJob?.isActive != true) reload(position, play = true)
+        // Nothing to play at this place yet: start over so the piece is made the quick way, part by part,
+        // even if it was already being made whole for the cache.
+        if (renderJob?.isActive != true || (queuedUntil < position && !player.playWhenReady)) reload(position, play = true)
         player.playWhenReady = true
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
         if (mutable.value.waiting) wake.trySend(Unit)
@@ -307,7 +310,7 @@ class Narration(private val context: Context, private val library: Library, priv
         earlyDir.listFiles()?.forEach { it.delete() }
         player.playWhenReady = play
         renderJob?.cancel()
-        renderJob = if (play || settings.value.listening || mutable.value.preparingAll) scope.launch { renderLoop() } else null
+        renderJob = if (play || settings.value.listening || settings.value.readyWhileReading || mutable.value.preparingAll) scope.launch { renderLoop() } else null
         publish()
     }
 
@@ -355,9 +358,14 @@ class Narration(private val context: Context, private val library: Library, priv
         mutable.value = mutable.value.copy(buffered = null)
     }
 
+    /** The book is only being read: the player is hidden and nothing plays. */
+    private fun quiet() = !settings.value.listening && !player.playWhenReady
+
     private suspend fun renderLoop() {
         val opened = book ?: return
         val folder = library.audioDir(opened.book.id)
+        // Only reading: wait until the reader has settled on a place before spending the battery on it.
+        if (quiet() && !mutable.value.preparingAll) delay(READY_DELAY_MS)
         // A book that came with all its audio needs no voice; a piece without audio is read by the model as usual.
         val resolved = if (opened.pieces.all { it.clip != null }) null else ensureVoice() ?: return
         queueReady(resolved)
@@ -367,7 +375,7 @@ class Narration(private val context: Context, private val library: Library, priv
                 recount = false
                 mutable.value = mutable.value.copy(preparedTotal = countReady(opened, folder, resolved, mutable.value.preparedFrom))
             }
-            val ahead = if (mutable.value.preparingAll) opened.pieces.size else settings.value.prepareAhead
+            val ahead = if (mutable.value.preparingAll) opened.pieces.size else if (quiet()) READY_WHILE_READING - 1 else settings.value.prepareAhead
             val limit = (position + ahead).coerceAtMost(opened.pieces.size - 1)
             val target = (queuedUntil + 1..limit).firstOrNull { resolved != null && opened.pieces[it].clip == null && !renderer.file(folder, resolved, opened.pieces[it]).isFile }
             if (target == null || resolved == null) {
@@ -378,7 +386,7 @@ class Narration(private val context: Context, private val library: Library, priv
             mutable.value = mutable.value.copy(rendering = true)
             var played = 0
             // The listener is on the last ready piece, or already waiting: play this one part by part as it is generated.
-            val early = if (target == queuedUntil + 1 && queuedUntil <= position && holdFrom < 0) EarlyParts(earlyDir) { part ->
+            val early = if (target == queuedUntil + 1 && queuedUntil <= position && holdFrom < 0 && player.playWhenReady) EarlyParts(earlyDir) { part ->
                 withContext(Dispatchers.Main) {
                     val count = player.mediaItemCount
                     player.addMediaItem(item(opened, target, part))
@@ -419,6 +427,9 @@ class Narration(private val context: Context, private val library: Library, priv
     companion object {
         /** Passages to have ready before playback resumes after running dry. */
         const val HOLD_PIECES = 3
+        /** Passages kept ready at the reading place when the reader asked for that, and how long the place must stay put first. */
+        const val READY_WHILE_READING = 2
+        const val READY_DELAY_MS = 2000L
     }
 
     /** Forgets the open book, e.g. when it is deleted. */

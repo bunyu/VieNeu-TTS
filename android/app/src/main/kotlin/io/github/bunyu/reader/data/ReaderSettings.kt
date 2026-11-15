@@ -27,6 +27,9 @@ sealed interface VoiceChoice {
 /** The paper and ink of the reading screen; AUTO follows the light or dark mode of the phone. */
 enum class ReadingTheme { AUTO, LIGHT, SEPIA, DARK, BLACK }
 
+/** Light or dark for the whole app; AUTO follows the phone. */
+enum class AppTheme { AUTO, LIGHT, DARK }
+
 data class Settings(
     val voice: VoiceChoice? = null,
     val speed: Float = 1f,
@@ -57,6 +60,11 @@ data class Settings(
     /** Screen brightness while reading, 0.01 to 1; negative follows the phone. */
     val brightness: Float = -1f,
     val keepScreenOn: Boolean = true,
+    /** While only reading, keep the passages at the reading place generated, so listening starts at once. */
+    val readyWhileReading: Boolean = false,
+    /** Language of the app's own words: "vi", "en", or empty to follow the phone. */
+    val language: String = "",
+    val appTheme: AppTheme = AppTheme.AUTO,
 ) {
     fun textRules() = VietnameseText(dialect, VietnameseText.parsePronunciations(pronunciations))
 }
@@ -89,6 +97,9 @@ class ReaderSettings(context: Context) {
         justify = prefs.getBoolean("justify", false),
         brightness = prefs.getFloat("brightness", -1f).coerceIn(-1f, 1f),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
+        readyWhileReading = prefs.getBoolean("readyWhileReading", false),
+        language = prefs.getString("language", "").orEmpty().takeIf { it in LANGUAGES }.orEmpty(),
+        appTheme = runCatching { AppTheme.valueOf(prefs.getString("appTheme", null) ?: "AUTO") }.getOrDefault(AppTheme.AUTO),
     )
 
     fun update(change: (Settings) -> Settings) {
@@ -115,12 +126,25 @@ class ReaderSettings(context: Context) {
             .putBoolean("justify", next.justify)
             .putFloat("brightness", next.brightness.coerceIn(-1f, 1f))
             .putBoolean("keepScreenOn", next.keepScreenOn)
+            .putBoolean("readyWhileReading", next.readyWhileReading)
+            .putString("language", next.language.takeIf { it in LANGUAGES }.orEmpty())
+            .putString("appTheme", next.appTheme.name)
             .apply()
         state.value = next
     }
 
     companion object {
+        val LANGUAGES = setOf("vi", "en")
         val FONT_SIZES = 14..32
+
+        /** [base] speaking the language the user chose for the app, or [base] itself when that is the phone's. */
+        fun localized(base: Context): Context {
+            val tag = base.getSharedPreferences("reader", Context.MODE_PRIVATE).getString("language", "").orEmpty()
+            if (tag !in LANGUAGES) return base
+            val configuration = android.content.res.Configuration(base.resources.configuration)
+            configuration.setLocale(java.util.Locale.forLanguageTag(tag))
+            return base.createConfigurationContext(configuration)
+        }
         val MARGINS = 8..40
     }
 }

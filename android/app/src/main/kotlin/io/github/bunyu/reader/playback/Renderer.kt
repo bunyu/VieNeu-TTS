@@ -72,9 +72,10 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
     val speed get() = vieneu.speed
 
     /**
-     * Generates [piece] into the book's audio folder. With [early], each part is also handed over as its own
-     * file the moment it is spoken, and the first part is kept short, so a waiting listener hears the start
-     * of the piece while the rest is still being generated.
+     * Generates [piece] into the book's audio folder. With [early], someone is waiting to hear it: each part is
+     * handed over as its own file the moment it is spoken, the parts start short and grow, and the very first
+     * one is made with half the steps, so the first words come as soon as the phone can manage. Audio made
+     * this way is only played, never kept: the piece is generated properly the next time it is needed.
      */
     suspend fun render(folder: File, voice: ResolvedVoice, piece: BookPiece, early: EarlyParts? = null): File = withContext(Dispatchers.Default) {
         val target = file(folder, voice, piece)
@@ -83,9 +84,11 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
         val rate = NanoEngine.SAMPLE_RATE
         val context = coroutineContext
         val polished = ArrayList<FloatArray>()
+        var handedOver = 0
         suspend fun done(samples: FloatArray) {
             polished += samples
             if (early == null || samples.isEmpty()) return
+            handedOver++
             early.folder.mkdirs()
             val part = File(early.folder, UUID.randomUUID().toString() + ".m4a")
             AacWriter.write(LocalAudio(samples, rate), part)
@@ -104,10 +107,12 @@ class Renderer(private val vieneu: VieNeu, private val voices: ReaderVoices) {
             if (parts.isEmpty() && segment.pauseMillis != null) done(FloatArray((rate.toLong() * after / 1000).toInt()))
             parts.forEachIndexed { index, part ->
                 context.ensureActive()
-                val samples = vieneu.speak(part.text, voice.voice, voice.fast, voice.seed(piece, call++)) { !context.isActive }
+                val hurry = early != null && call == 0
+                val samples = vieneu.speak(part.text, voice.voice, voice.fast || hurry, voice.seed(piece, call++), measure = !hurry) { !context.isActive }
                 done(AudioPolish.finish(samples, rate, if (index == parts.lastIndex) after else part.pause.millis))
             }
         }
+        if (handedOver > 0) return@withContext target
         val joined = FloatArray(polished.sumOf { it.size }).also { out -> var at = 0; for (p in polished) { p.copyInto(out, at); at += p.size } }
         val pending = File(folder, UUID.randomUUID().toString() + ".m4a")
         try {

@@ -79,13 +79,14 @@ class VieNeu(private val context: Context) {
     }
 
     /** Spoken-form text to 24 kHz samples. Text longer than [NanoEngine.MAX_CHARACTERS] must be split first. */
-    suspend fun speak(text: String, voice: NanoVoice, fast: Boolean, seed: Long, cancelled: () -> Boolean): FloatArray {
+    suspend fun speak(text: String, voice: NanoVoice, fast: Boolean, seed: Long, measure: Boolean = true, cancelled: () -> Boolean): FloatArray {
         val model = load()
         return withContext(Dispatchers.Default) {
             try {
                 val started = System.nanoTime()
                 model.engine.speak(model.g2p.phonemize(text), voice, options(fast), seed, cancelled).also { samples ->
                     // The two modes differ about twofold, so a measurement never mixes them.
+                    if (!measure) return@also
                     if (fast != meterFast) { meter.reset(); meterFast = fast }
                     mutableSpeed.value = meter.add(samples.size.toDouble() / NanoEngine.SAMPLE_RATE, (System.nanoTime() - started) / 1e9)
                 }

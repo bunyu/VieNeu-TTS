@@ -58,8 +58,80 @@ object PreparedAudio {
     const val FOLDER = "prepared"
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** What an import did: the books it added to, how many audio files went in, and sync files whose audio was not among the files. */
-    class Result(val books: List<String>, val parts: Int, val withoutAudio: Int)
+    /**
+     * What an import did: the books it added to, how many audio files went in, sync files whose audio was not
+     * among the files, and files of a shared folder left alone because the book already has them.
+     */
+    class Result(val books: List<String>, val parts: Int, val withoutAudio: Int, val alreadyThere: Int = 0)
+
+    private val AUDIO = setOf("opus", "ogg", "oga", "mp3", "m4a", "aac", "wav", "flac")
+    /** A file an import can use: audio, a sync file, or a zip of them. */
+    fun wanted(name: String) = name.endsWith(SUFFIX, true) || name.endsWith(".zip", true) || name.substringAfterLast('.', "").lowercase() in AUDIO
+
+    /** The id in a link to a shared Google Drive folder, or null for any other link. */
+    fun driveFolder(link: String): String? = Regex("""drive\.google\.com/(?:drive/)?(?:u/\d+/)?folders/([\w-]{10,})""").find(link)?.groupValues?.get(1)
+
+    class DriveEntry(val id: String, val name: String, val folder: Boolean)
+
+    /**
+     * The entries of a shared Drive folder, read from the plain list page Drive serves for embedding
+     * (`embeddedfolderview`): each entry is a block with a link to the file or sub-folder and its title.
+     * Google does not promise this page; when it changes, the list comes back empty and the import says so.
+     */
+    internal fun parseDriveFolder(html: String): List<DriveEntry> = html.split("class=\"flip-entry\"").drop(1).mapNotNull { block ->
+        val title = Regex("""flip-entry-title">([^<]*)<""").find(block)?.groupValues?.get(1)?.let(::unescape)?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        val file = Regex("""/file/d/([\w-]{10,})""").find(block)?.groupValues?.get(1)
+        val folder = Regex("""/folders/([\w-]{10,})""").find(block)?.groupValues?.get(1)
+        val id = file ?: folder ?: Regex("""id="entry-([\w-]{10,})"""").find(block)?.groupValues?.get(1) ?: return@mapNotNull null
+        DriveEntry(id, title, file == null && folder != null)
+    }
+
+    private fun unescape(text: String) = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+
+    private fun page(address: String): String {
+        val connection = (URL(address).openConnection() as HttpURLConnection).apply { connectTimeout = 20_000; readTimeout = 60_000; setRequestProperty("User-Agent", "Mozilla/5.0") }
+        try {
+            if (connection.responseCode != 200) throw LinkFailed("http ${connection.responseCode}")
+            return connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        } finally { connection.disconnect() }
+    }
+
+    /** True when the library under [root] already holds this part of this book. */
+    fun have(root: File, sync: SyncFile): Boolean = root.listFiles().orEmpty().any { folder ->
+        runCatching { json.decodeFromString(PreparedBook.serializer(), File(folder, FILE).readText()) }.getOrNull()
+            ?.let { it.title == sync.book && it.parts.any { part -> part.index == sync.index } } == true
+    }
+
+    /**
+     * Downloads what an import can use from a shared Drive folder (and the folders directly inside it) into
+     * [staging]. Sync files come first: a part the library already has is not downloaded again, so the same
+     * folder link can be used whenever new parts were put there. Returns how many parts were left alone.
+     */
+    fun fetchDriveFolder(root: File, id: String, staging: File, progress: (Int, Int) -> Unit = { _, _ -> }, list: (String) -> List<DriveEntry> = { parseDriveFolder(page("https://drive.google.com/embeddedfolderview?id=$it#list")) },
+                         fetch: (DriveEntry, File) -> File = { entry, into -> download("https://drive.google.com/file/d/${entry.id}/view", into, name = entry.name) }): Int {
+        val top = list(id)
+        val files = (top.filter { !it.folder } + top.filter { it.folder }.flatMap { inner -> list(inner.id).filter { !it.folder } }).filter { wanted(it.name) }.distinctBy { it.name }
+        if (files.isEmpty()) throw LinkFailed("folder")
+        staging.mkdirs()
+        var done = 0
+        val skip = mutableSetOf<String>()
+        val syncs = files.filter { it.name.endsWith(SUFFIX, true) }
+        val others = files - syncs.toSet()
+        var total = files.size
+        for (entry in syncs) {
+            val file = fetch(entry, staging)
+            val sync = runCatching { parse(file.readText()) }.getOrNull()
+            if (sync != null && have(root, sync)) {
+                file.delete()
+                skip += entry.name.dropLast(SUFFIX.length); skip += sync.audio
+            }
+            progress(++done, total)
+        }
+        val needed = others.filter { it.name !in skip }
+        total = syncs.size + needed.size
+        for (entry in needed) { fetch(entry, staging); progress(++done, total) }
+        return others.size - needed.size
+    }
 
     fun parse(text: String): SyncFile {
         val root = Json.parseToJsonElement(text).jsonObject
@@ -157,7 +229,7 @@ object PreparedAudio {
     }
 
     /** Downloads the file behind [link] into [into] under the name the server gives it; a web page instead of a file is refused. */
-    fun download(link: String, into: File, progress: (Long) -> Unit = {}): File {
+    fun download(link: String, into: File, name: String? = null, progress: (Long) -> Unit = {}): File {
         var url = URL(directLink(link))
         repeat(8) {
             val connection = (url.openConnection() as HttpURLConnection).apply { instanceFollowRedirects = false; connectTimeout = 20_000; readTimeout = 60_000 }
@@ -167,8 +239,8 @@ object PreparedAudio {
                 if (code != 200) throw LinkFailed("http $code")
                 // A private Drive file, or one that needs a click to confirm, answers with a page, not the file.
                 if (connection.contentType.orEmpty().startsWith("text/html", true)) throw LinkFailed("page")
-                val name = fileName(connection.getHeaderField("Content-Disposition")) ?: File(URLDecoder.decode(url.path, "UTF-8")).name.ifEmpty { "download" }
-                val target = File(into.apply { mkdirs() }, File(name).name)
+                val given = name ?: fileName(connection.getHeaderField("Content-Disposition")) ?: File(URLDecoder.decode(url.path, "UTF-8")).name.ifEmpty { "download" }
+                val target = File(into.apply { mkdirs() }, File(given).name)
                 connection.inputStream.use { input ->
                     target.outputStream().use { out ->
                         val buffer = ByteArray(262_144); var total = 0L

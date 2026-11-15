@@ -25,6 +25,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import android.content.Context
+import io.github.bunyu.reader.data.ReaderSettings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,8 +49,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         incoming.value = sharedUri(intent)
-        setContent { ReaderTheme { ReaderRoot(incoming.value) { incoming.value = null } } }
+        setContent {
+            val settings by ReaderApp.get(this).settings.flow.collectAsState()
+            ReaderTheme(settings.appTheme) { ReaderRoot(incoming.value) { incoming.value = null } }
+        }
     }
+
+    // The app's words follow the language chosen in Settings, whatever the phone speaks.
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(ReaderSettings.localized(base))
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

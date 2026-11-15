@@ -39,24 +39,35 @@ object Chunker {
     }
 
     /**
-     * The model calls for one spoken stretch of a piece. With [quickStart] the first call is only the opening
-     * sentences (at least [quickChars] characters), so a listener who is waiting hears the first words sooner.
+     * The model calls for one spoken stretch of a piece. With [quickStart] the calls start small and grow:
+     * the opening sentences (at least [quickChars] characters), then about [rampChars], then the usual
+     * size. A listener who is waiting hears the first words sooner, and because each call is generated
+     * while the one before it plays, no call may be much longer than what is already playing.
      */
-    fun calls(spoken: String, maxChars: Int, minChars: Int = 40, quickStart: Boolean = false, quickChars: Int = 30): List<Piece> {
+    fun calls(spoken: String, maxChars: Int, minChars: Int = 40, quickStart: Boolean = false, quickChars: Int = 30, rampChars: Int = 70): List<Piece> {
         val whole = split(spoken, maxChars, minChars)
         val text = spoken.trim()
         if (!quickStart || whole.isEmpty() || '\n' in text) return whole
         val sentences = sentences(text)
-        var head = ""
         var used = 0
-        for (sentence in sentences) {
-            head = if (head.isEmpty()) sentence else "$head $sentence"
-            used++
-            if (head.length >= quickChars) break
+        /** Whole sentences until [atLeast] characters are reached, never past [atMost] once there is one. */
+        fun take(atLeast: Int, atMost: Int): String {
+            var taken = ""
+            while (used < sentences.size) {
+                val next = sentences[used]
+                if (taken.isNotEmpty() && (taken.length >= atLeast || taken.length + 1 + next.length > atMost)) break
+                taken = if (taken.isEmpty()) next else "$taken $next"
+                used++
+            }
+            return taken
         }
+        val head = take(quickChars, maxChars)
         // No gain when the opening is the whole stretch, or as long as the usual first call.
         if (used == sentences.size || head.length > maxChars || head.length >= whole.first().text.length) return whole
-        return listOf(Piece(head, Pause.SENTENCE)) + split(sentences.drop(used).joinToString(" "), maxChars, minChars)
+        val second = take(rampChars, rampChars)
+        val rest = sentences.drop(used).joinToString(" ")
+        return listOf(Piece(head, Pause.SENTENCE)) + split(second, maxChars, minChars).map { it.copy(pause = Pause.SENTENCE) } +
+            if (rest.isEmpty()) emptyList() else split(rest, maxChars, minChars)
     }
 
     internal fun sentences(paragraph: String): List<String> {

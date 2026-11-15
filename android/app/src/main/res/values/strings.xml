@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VieNeu Reader</string>
+    <string name="app_name">Doc truyen</string>
     <string name="tab_library">Library</string>
     <string name="tab_voices">Voices</string>
     <string name="tab_settings">Settings</string>
@@ -153,9 +153,19 @@
     <string name="fast_suggest">The voice is slower than listening. Turn on faster generation</string>
     <string name="prepared_add">Add audio made on a PC</string>
     <string name="prepared_link">Get PC audio from a link</string>
-    <string name="prepared_link_hint">One link per line: each audio file and the .sync.json file made beside it, or one .zip holding them. A Google Drive file must be shared with “Anyone with the link”.</string>
+    <string name="prepared_link_hint">Paste the link to a Google Drive folder and the app finds every audio file and .sync.json file in it. Or paste one link per line: each audio file and its .sync.json file, or a .zip of them. The folder or files must be shared with “Anyone with the link”.</string>
     <string name="prepared_done">%1$d audio files added.</string>
     <string name="prepared_none">Nothing was added. Each audio file needs the .sync.json file that was made beside it: pick both.</string>
     <string name="prepared_failed">The audio could not be fetched. Check the link, and that the file is shared with anyone who has it.</string>
     <string name="download">Download</string>
+    <string name="ready_while_reading">Keep the voice ready while reading</string>
+    <string name="ready_while_reading_hint">Prepares the passages at the place you are reading, so listening starts at once. Uses some battery each time you stop scrolling.</string>
+    <string name="prepared_files">Audio files</string>
+    <string name="prepared_from_link">Audio link</string>
+    <string name="prepared_progress">Downloading: %1$d of %2$d files</string>
+    <string name="prepared_nothing_new">Nothing new: the book already has every audio file in that folder.</string>
+    <string name="interface_title">Interface</string>
+    <string name="language">Language</string>
+    <string name="language_phone">Same as the phone</string>
+    <string name="app_theme">Light or dark</string>
 </resources>

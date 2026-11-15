@@ -6,6 +6,10 @@ State as of 2026-11-15: `main` at `b9b4286` on `bunyu/VieNeu-TTS` (a fork of
 feature from `main` on a branch of its own; push to `main` only once the work is
 finished and tested.
 
+## In progress
+
+Nothing is in progress.
+
 ## Branch `claude/reader-fast-start` (2026-11-15)
 
 Built and unit-tested on the PC; **nothing on this branch has been run on the phone
@@ -41,6 +45,31 @@ Reader (Android):
   `prepared/NNNN.ext`; its pieces are the paragraphs of the sync files, each a `Clip`
   played as a clipped ExoPlayer item, so highlight, seek, speed and the sleep timer work
   as for generated audio. Parts can be added later and in any order.
+
+- **Release build, named "Doc truyen".** `:app:assembleRelease` writes
+  `app/build/outputs/apk/release/Doc truyen-release.apk`: not debuggable, arm64 only,
+  not shrunk, and signed with this PC's debug key so it installs over the debug builds
+  and keeps their data. The app's label is "Doc truyen" in both languages.
+- **First sound.** A piece someone is waiting for is made in growing parts (opening
+  sentence, about 70 characters, then full size; `Chunker.calls`), the first with half
+  the steps; that audio is played and thrown away, and the piece is generated properly
+  the next time. Pressing play where nothing is ready restarts the piece that way.
+  Settings → "Keep the voice ready while reading" generates the two passages at the
+  reading place two seconds after the scroll stops (`readyWhileReading`).
+- **Shared Drive folder.** A link to a Drive folder is searched for audio, sync and zip
+  files (`PreparedAudio.fetchDriveFolder`, one level of sub-folders); parts the book
+  already has are not downloaded again. The list comes from Drive's
+  `embeddedfolderview` page, which Google does not promise. Checked on 2026-11-15
+  with the same patterns against a public test folder (the 100-file example folder of
+  the gdown project: all 100 entries listed, sub-folders told apart, a small file
+  downloaded through the rewritten link). Not tried: the app itself on the phone, a
+  folder of more than 100 files, and a large audio file (Drive may answer with a
+  "cannot scan for viruses" page for big files; the link carries `confirm=t` for that).
+- **Interface.** Settings → language (phone / Tiếng Việt / English, applied by
+  `ReaderSettings.localized` in `MainActivity.attachBaseContext`, then the activity is
+  rebuilt; the notification text still follows the phone) and light / dark
+  (`AppTheme`, `LocalAppDark`). The library has three buttons: add book, audio files,
+  audio link.
 
 Windows app:
 

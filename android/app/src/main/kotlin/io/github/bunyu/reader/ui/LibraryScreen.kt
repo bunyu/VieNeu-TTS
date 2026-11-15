@@ -55,6 +55,7 @@ import io.github.bunyu.reader.ReaderApp
 import io.github.bunyu.reader.data.BookSummary
 import io.github.bunyu.reader.data.PreparedAudio
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,8 +66,9 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
     val narration by app.narration.state.collectAsState()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(onImport) }
     val scope = rememberCoroutineScope()
-    var menu by remember { mutableStateOf(false) }
     var linking by remember { mutableStateOf(false) }
+    /** Files of a shared folder downloaded so far, and how many there are. */
+    var fetched by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var fetching by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -75,10 +77,11 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
         fetching = true
         scope.launch {
             val result = runCatching { import() }
-            fetching = false
+            fetching = false; fetched = null
             val done = result.getOrNull()
             notice = when {
                 done == null -> context.getString(R.string.prepared_failed)
+                done.parts == 0 && done.alreadyThere > 0 -> context.getString(R.string.prepared_nothing_new)
                 done.parts == 0 -> context.getString(R.string.prepared_none)
                 else -> context.getString(R.string.prepared_done, done.parts)
             }
@@ -92,19 +95,16 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
 
     Scaffold(
         modifier = modifier,
-        topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.tab_library)) }, actions = {
-                Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.more)) }
-                    DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text(stringResource(R.string.prepared_add)) }, onClick = { menu = false; pickAudio.launch(arrayOf("*/*")) })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.prepared_link)) }, onClick = { menu = false; linking = true })
-                    }
-                }
-            })
-        },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_library)) }) },
         floatingActionButton = {
-            if (books.isNotEmpty()) ExtendedFloatingActionButton(onClick = ::choose, icon = { Icon(Icons.Filled.Add, null) }, text = { Text(stringResource(R.string.add_book)) })
+            // The three ways to add a book: its file, or audio made on a PC, from storage or from a link.
+            if (books.isNotEmpty()) Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExtendedFloatingActionButton(onClick = { linking = true }, containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    icon = { Icon(painterResource(R.drawable.ic_headphones), null) }, text = { Text(stringResource(R.string.prepared_from_link)) })
+                ExtendedFloatingActionButton(onClick = { pickAudio.launch(arrayOf("*/*")) }, containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    icon = { Icon(painterResource(R.drawable.ic_headphones), null) }, text = { Text(stringResource(R.string.prepared_files)) })
+                ExtendedFloatingActionButton(onClick = ::choose, icon = { Icon(Icons.Filled.Add, null) }, text = { Text(stringResource(R.string.add_book)) })
+            }
         },
         bottomBar = {
             val id = narration.bookId
@@ -123,6 +123,7 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (importing || fetching) LinearProgressIndicator(Modifier.fillMaxWidth())
+            fetched?.let { (done, total) -> Text(stringResource(R.string.prepared_progress, done, total), Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium) }
             if (books.isEmpty()) {
                 Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(painterResource(R.drawable.ic_notification), null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
@@ -130,13 +131,15 @@ fun LibraryScreen(modifier: Modifier, importing: Boolean, onOpen: (String) -> Un
                     Text(stringResource(R.string.library_empty), style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = ::choose, enabled = !importing) { Text(stringResource(R.string.add_book)) }
+                    OutlinedButton(onClick = { pickAudio.launch(arrayOf("*/*")) }, enabled = !fetching) { Text(stringResource(R.string.prepared_files)) }
+                    OutlinedButton(onClick = { linking = true }, enabled = !fetching) { Text(stringResource(R.string.prepared_from_link)) }
                 }
-            } else LazyColumn(contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            } else LazyColumn(contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 220.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(books, key = { it.id }) { book -> BookCard(book, onOpen) }
             }
         }
     }
-    if (linking) LinkDialog(onDismiss = { linking = false }) { links -> linking = false; prepared { app.library.importPreparedLinks(links) } }
+    if (linking) LinkDialog(onDismiss = { linking = false }) { links -> linking = false; prepared { app.library.importPreparedLinks(links) { done, total -> fetched = done to total } } }
     notice?.let { message ->
         AlertDialog(onDismissRequest = { notice = null }, text = { Text(message) }, confirmButton = { TextButton({ notice = null }) { Text(stringResource(R.string.close)) } })
     }

@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.bunyu.reader.R
+import io.github.bunyu.reader.data.AppTheme
 import io.github.bunyu.reader.ReaderApp
 import io.github.bunyu.reader.text.Dialect
 import io.github.bunyu.reader.vieneu.ReleaseFile
@@ -51,6 +52,26 @@ fun SettingsScreen(modifier: Modifier) {
     var words by remember { mutableStateOf(settings.pronunciations) }
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_settings)) }) }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                val activity = LocalContext.current as? android.app.Activity
+                Text(stringResource(R.string.interface_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.language), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((tag, label) in listOf("" to stringResource(R.string.language_phone), "vi" to "Tiếng Việt", "en" to "English"))
+                        androidx.compose.material3.FilterChip(selected = settings.language == tag, label = { Text(label) }, onClick = {
+                            if (settings.language != tag) {
+                                app.settings.update { it.copy(language = tag) }
+                                // The screen is rebuilt so every word is read again in the new language.
+                                activity?.recreate()
+                            }
+                        })
+                }
+                Text(stringResource(R.string.app_theme), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((theme, label) in listOf(AppTheme.AUTO to R.string.theme_auto, AppTheme.LIGHT to R.string.theme_light, AppTheme.DARK to R.string.theme_dark))
+                        androidx.compose.material3.FilterChip(selected = settings.appTheme == theme, label = { Text(stringResource(label)) }, onClick = { app.settings.update { it.copy(appTheme = theme) } })
+                }
+            }
             item { Text(stringResource(R.string.engines), style = MaterialTheme.typography.titleMedium) }
             item { EngineCard() }
             item {
@@ -60,6 +81,15 @@ fun SettingsScreen(modifier: Modifier) {
                         Text(stringResource(R.string.fast_mode_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(settings.fast, { on -> app.settings.update { it.copy(fast = on) } })
+                }
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.ready_while_reading))
+                        Text(stringResource(R.string.ready_while_reading_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(settings.readyWhileReading, { on -> app.settings.update { it.copy(readyWhileReading = on) } })
                 }
             }
             item {

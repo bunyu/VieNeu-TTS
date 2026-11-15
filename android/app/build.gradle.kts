@@ -14,8 +14,18 @@ android {
         minSdk = 29
         targetSdk = 36
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        base.archivesName.set("Doc truyen")
         versionCode = 1
         versionName = "0.1.0"
+    }
+    buildTypes {
+        release {
+            // Signed with this PC's debug key, the one every earlier build carried, so the release installs
+            // over them and keeps the books, voices and the downloaded model. Not for a store.
+            signingConfig = signingConfigs.getByName("debug")
+            // Left off until a shrunk build has been tried on a phone: ONNX Runtime and the phonemiser are reached through JNI.
+            isMinifyEnabled = false
+        }
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -23,6 +33,8 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/licences"))
     packaging { jniLibs.useLegacyPackaging = false }
 }
+// The release is for phones only: the x86_64 libraries serve emulators and make up 46 MB of the file.
+androidComponents { onVariants(selector().withBuildType("release")) { it.packaging.jniLibs.excludes.add("**/x86_64/**") } }
 kotlin { jvmToolchain(21); compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 
 // The Vietnamese phonemiser is Rust (native/g2p). It needs rustup with the Android targets and cargo-ndk:

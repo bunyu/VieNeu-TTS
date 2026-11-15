@@ -4,6 +4,13 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import io.github.bunyu.reader.data.ReadingTheme
+import io.github.bunyu.reader.data.AppTheme
+import android.app.Activity
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -26,10 +33,13 @@ private val Dark = darkColorScheme(
     surfaceVariant = Color(0xFF3A2F28), onSurfaceVariant = Color(0xFFD8C2B6), surfaceContainer = Color(0xFF231C17),
 )
 
+/** Whether the app is dark right now: the user's choice, or the phone's when left on automatic. */
+val LocalAppDark = staticCompositionLocalOf { false }
+
 /** Colours of the book screen for the reading theme the user chose. */
 @Composable
 fun readingColors(theme: ReadingTheme): ColorScheme = when (theme) {
-    ReadingTheme.AUTO -> if (isSystemInDarkTheme()) Dark else Light
+    ReadingTheme.AUTO -> if (LocalAppDark.current) Dark else Light
     ReadingTheme.LIGHT -> Light.copy(background = Color(0xFFFDFDFB), surface = Color(0xFFFDFDFB), onBackground = Color(0xFF1C1B1A), onSurface = Color(0xFF1C1B1A))
     ReadingTheme.SEPIA -> Light.copy(background = Color(0xFFF1E2C6), surface = Color(0xFFF1E2C6), onBackground = Color(0xFF4A3622), onSurface = Color(0xFF4A3622),
         surfaceVariant = Color(0xFFE6D3B1), surfaceContainer = Color(0xFFEAD9B9))
@@ -45,11 +55,20 @@ fun ReadingTheme.isDark(systemDark: Boolean) = when (this) {
 }
 
 @Composable
-fun ReaderTheme(content: @Composable () -> Unit) {
+fun ReaderTheme(theme: AppTheme = AppTheme.AUTO, content: @Composable () -> Unit) {
     val base = Typography()
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
-        typography = base.copy(bodyLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 19.sp, lineHeight = 30.sp)),
-        content = content,
-    )
+    val dark = when (theme) { AppTheme.AUTO -> isSystemInDarkTheme(); AppTheme.DARK -> true; AppTheme.LIGHT -> false }
+    // The status and navigation bar icons must contrast with the app's colours, not the phone's mode.
+    val view = LocalView.current
+    val window = (view.context as? Activity)?.window
+    if (window != null) SideEffect {
+        WindowCompat.getInsetsController(window, view).apply { isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark }
+    }
+    CompositionLocalProvider(LocalAppDark provides dark) {
+        MaterialTheme(
+            colorScheme = if (dark) Dark else Light,
+            typography = base.copy(bodyLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 19.sp, lineHeight = 30.sp)),
+            content = content,
+        )
+    }
 }
