@@ -54,21 +54,31 @@ class ReaderVoices(private val root: File, private val decoder: AudioDecoder = P
      */
     suspend fun add(clip: File, name: String, enroll: suspend (LocalAudio) -> NanoVoice): ReaderVoice = withContext(Dispatchers.IO) {
         require(name.isNotBlank())
+        val decoded = decoder.decode(clip, 24_000, 30)
+        if (decoded.seconds < 2) throw EnrolmentFailed("too_short")
+        store(name, enroll(decoded), clip)
+    }
+
+    /** Keeps a voice that was enrolled elsewhere, such as by the Windows app; [preview] is a clip spoken in it. */
+    suspend fun addEnrolled(name: String, print: NanoVoice, preview: File?): ReaderVoice = withContext(Dispatchers.IO) {
+        require(name.isNotBlank())
+        store(name, print, preview)
+    }
+
+    private suspend fun store(name: String, print: NanoVoice, preview: File?): ReaderVoice {
         val id = UUID.randomUUID().toString()
         val folder = dir(id).apply { mkdirs() }
         try {
-            val decoded = decoder.decode(clip, 24_000, 30)
-            if (decoded.seconds < 2) throw EnrolmentFailed("too_short")
-            val print = enroll(decoded)
             require(print.speaker.size == SPEAKER && print.styleTokens == STYLE_TOKENS)
             val bytes = ByteBuffer.allocate((print.speaker.size + print.style.size) * 4).order(ByteOrder.LITTLE_ENDIAN)
             bytes.asFloatBuffer().put(print.speaker).put(print.style)
             File(folder, PRINT).writeBytes(bytes.array())
-            clip.copyTo(File(folder, "preview." + clip.extension.lowercase().filter { it.isLetterOrDigit() }.take(5).ifEmpty { "audio" }), overwrite = true)
+            preview?.copyTo(File(folder, "preview." + preview.extension.lowercase().filter { it.isLetterOrDigit() }.take(5).ifEmpty { "audio" }), overwrite = true)
             val now = System.currentTimeMillis()
             val voice = ReaderVoice(id, name.trim().take(200), importedAt = now, enrolledAt = now)
             File(folder, "voice.json").writeText(json.encodeToString(ReaderVoice.serializer(), voice))
-            refresh(); voice
+            refresh()
+            return voice
         } catch (e: Throwable) { folder.deleteRecursively(); throw e }
     }
 

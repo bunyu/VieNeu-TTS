@@ -77,7 +77,7 @@
     <string name="fast_mode">Faster generation</string>
     <string name="fast_mode_hint">About twice as fast, slightly rougher sound. Use it if reading stalls.</string>
     <string name="voices_your">Your voices</string>
-    <string name="voices_clone_how">Record yourself reading a short passage, or pick a clean recording of one speaker (10 to 30 seconds, no music or noise). A voice exported from VoiceStudio (.ovsvoice) works too.</string>
+    <string name="voices_clone_how">Record yourself reading a short passage, or pick a clean recording of one speaker (10 to 30 seconds, no music or noise). A voice made in the Windows app (.dtvoice, from “Dùng giọng trên app điện thoại”) or exported from VoiceStudio (.ovsvoice) works too: choose “From a file”.</string>
     <string name="voice_clone">Clone a voice</string>
     <string name="voice_clone_download">Cloning needs a %1$d MB download the first time.</string>
     <string name="voice_name">Name</string>
@@ -168,4 +168,6 @@
     <string name="language">Language</string>
     <string name="language_phone">Same as the phone</string>
     <string name="app_theme">Light or dark</string>
+    <string name="voice_add">Add the voice</string>
+    <string name="voice_error_pc_model">This voice was made for another version of the phone model. Make it again in an up-to-date Windows app.</string>
 </resources>

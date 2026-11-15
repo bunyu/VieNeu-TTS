@@ -2299,6 +2299,25 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                             btn_lab_save = gr.Button("💾 Lưu bản này thành giọng mẫu", variant="secondary", size="sm", scale=0, min_width=220)
                             lab_save_status = gr.Markdown(visible=False)
 
+                        with gr.Accordion("📱 Dùng giọng trên app điện thoại (Doc truyen)", open=False) as phone_acc:
+                            gr.Markdown(
+                                "App điện thoại đọc bằng model **v3 Nano**, nên giọng ở đây (giọng clone, giọng có sẵn hay giọng đã fine-tune) "
+                                "được chuyển sang: giọng đọc một đoạn mẫu, rồi Nano học lại đoạn đó. Bấm tạo, **nghe thử bản trên điện thoại**, "
+                                "rồi chép file `.dtvoice` sang điện thoại (cáp USB, Google Drive, Zalo…) và mở nó trong app: "
+                                "**Giọng đọc → Từ tệp**. Lần đầu máy tải model Nano của điện thoại (khoảng 380 MB).\n\n"
+                                "Nano nhỏ hơn Turbo nhiều, nên giọng trên điện thoại chỉ gần giống chứ không y hệt. "
+                                "Muốn nghe đúng giọng Turbo trên điện thoại, hãy tạo audio cho cả sách ở tab **📚 Sách → audio** rồi thêm vào app."
+                            )
+                            with gr.Row():
+                                phone_voice_dd = gr.Dropdown(choices=[], value=None, label="Giọng", allow_custom_value=True, scale=3)
+                                phone_name = gr.Textbox(label="Tên trên điện thoại", placeholder="VD: Giọng bố", scale=2)
+                            btn_phone = gr.Button("📱 Tạo file giọng cho điện thoại", variant="primary")
+                            phone_status = gr.Markdown()
+                            with gr.Row():
+                                phone_source = gr.Audio(label="Giọng gốc (Turbo) đọc đoạn mẫu", interactive=False)
+                                phone_sample = gr.Audio(label="Trên điện thoại (Nano) sẽ nghe như thế này", interactive=False)
+                            phone_file = gr.File(label="File giọng (.dtvoice)", interactive=False)
+
                     # --- TAB: FINE-TUNE (record a dataset sentence by sentence; training runs outside the app) ---
                     with gr.Tab("🎓 Fine-tune giọng", id="finetune_tab"):
                         gr.Markdown(
@@ -2315,10 +2334,19 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                         btn_ft_start = gr.Button("▶ Bắt đầu / thu tiếp", variant="secondary")
                         ft_progress = gr.Markdown()
                         ft_sentence = gr.Textbox(label="Hãy đọc câu này", lines=3, interactive=False)
-                        ft_audio = gr.Audio(label="Bản thu của câu này", sources=["microphone"], type="filepath")
+                        ft_audio = gr.Audio(label="Bản thu của câu này (thu bằng micro, hoặc tải lên file ghi âm của câu này)", sources=["microphone", "upload"], type="filepath")
                         with gr.Row():
                             btn_ft_save = gr.Button("💾 Lưu và sang câu tiếp", variant="primary")
                             btn_ft_skip = gr.Button("⏭ Bỏ qua câu này", variant="secondary")
+                        with gr.Accordion("📲 Tải lên một bản ghi âm dài (đọc nhiều câu liền, ví dụ bằng điện thoại)", open=False):
+                            gr.Markdown(
+                                "Ghi âm bằng điện thoại cũng được (file .m4a, .mp3, .wav…). Bấm **Bắt đầu / thu tiếp**, rồi đọc **đúng thứ tự** các câu "
+                                "bắt đầu từ câu đang hiện ở trên. Đọc liền mạch trong câu, **ngừng khoảng một giây sau mỗi câu**. Muốn bỏ một câu, đừng đọc nó "
+                                "mà hãy dừng ghi âm ở câu trước. Khi tải lên, app cắt bản ghi tại các chỗ ngừng và gán lần lượt cho từng câu; nếu một đoạn "
+                                "không khớp với câu của nó (ví dụ quên ngừng, đọc sót), app không lưu gì và báo đoạn sai."
+                            )
+                            ft_long = gr.Audio(label="Bản ghi âm dài", sources=["upload"], type="filepath")
+                            btn_ft_long = gr.Button("📲 Cắt và lưu theo từng câu", variant="secondary")
                         ft_state = gr.State({"sentences": [], "at": 0})
                         ft_train_md = gr.Markdown()
 
@@ -2693,6 +2721,49 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
         btn_lab_save.click(_lab_save, inputs=[lab_state, lab_pick, lab_name],
                            outputs=[lab_save_status, user_voice_dd, voice_select, srt_voice, *speaker_voice_dds])
 
+        # --- A voice for the phone app ---
+        def _phone_voices():
+            if not (model_loaded and tts is not None and hasattr(tts, "get_preset_voice")):
+                return gr.update(choices=[], value=None)
+            current = PRESET_VOICES_CACHE[0] if PRESET_VOICES_CACHE else None
+            value = current[1] if isinstance(current, (list, tuple)) else current
+            return gr.update(choices=PRESET_VOICES_CACHE, value=value)
+
+        phone_acc.expand(_phone_voices, outputs=[phone_voice_dd])
+
+        def _phone_export(voice_choice, name):
+            if not model_loaded or tts is None:
+                yield "⚠️ Vui lòng nạp model trước!", None, None, None
+                return
+            if "v3" not in (current_backbone or "").lower() or "nano" in (current_backbone or "").lower():
+                yield "⚠️ Hãy nạp một model **v3 Turbo** (bản thường hoặc bản 🎓 đã fine-tune).", None, None, None
+                return
+            from apps.phone_voice import export
+            voice_id = resolve_voice_id(voice_choice) if voice_choice else None
+            log = []
+            done = threading.Event()
+            result, error = {}, []
+
+            def work():
+                try:
+                    result.update(export(tts, voice_id, (name or "").strip() or voice_id or "Giọng của tôi",
+                                         Path.home() / "Music" / "Doc truyen - giong", report=log.append))
+                except BaseException as e:  # noqa: BLE001
+                    error.append(e)
+                finally:
+                    done.set()
+
+            threading.Thread(target=work, daemon=True).start()
+            while not done.wait(1.0):
+                yield "⏳ " + (log[-1] if log else "Đang chuẩn bị…"), None, None, None
+            if error:
+                yield f"❌ {error[0]}", None, None, None
+                return
+            yield (f"✅ Đã tạo `{result['file']}`. Nghe hai bản bên dưới; nếu ưng, chép file này sang điện thoại và mở trong app "
+                   "(Giọng đọc → Từ tệp)."), result["source"], result["sample"], result["file"]
+
+        btn_phone.click(_phone_export, inputs=[phone_voice_dd, phone_name], outputs=[phone_status, phone_source, phone_sample, phone_file])
+
         # --- Fine-tune: record one sentence at a time ---
         def _ft_view(name, state, note=""):
             from apps import finetune_studio as ft
@@ -2735,6 +2806,25 @@ with gr.Blocks(theme=theme, css=css, title="VieNeu-TTS", head=head_html) as demo
                 view[3] = gr.update()  # keep the take on screen so it can be heard or redone
                 return view
             return _ft_view(name, state, f"✅ Đã lưu ({seconds:.1f} giây).")
+
+        def _ft_long(name, state, audio_path):
+            from apps import finetune_studio as ft
+            sentences, at = state.get("sentences", []), int(state.get("at", 0))
+            if not (0 <= at < len(sentences)):
+                return _ft_view(name, state, "⚠️ Bấm **Bắt đầu / thu tiếp** để lấy danh sách câu trước.")
+            if not audio_path:
+                return _ft_view(name, state, "⚠️ Hãy tải lên một bản ghi âm.")
+            try:
+                ft.safe_name(name)
+                count, minutes, skipped = ft.import_reading(name, sentences[at:], audio_path)
+            except Exception as e:  # noqa: BLE001
+                return _ft_view(name, state, f"⚠️ {e}")
+            note = f"✅ Đã cắt và lưu {count} câu ({minutes:.1f} phút)."
+            if skipped:
+                note += f" Bỏ qua đoạn {', '.join(map(str, skipped))}: ngắn hơn 3 hoặc dài hơn 15 giây (đọc lại các câu đó riêng)."
+            return _ft_view(name, state, note)
+
+        btn_ft_long.click(_ft_long, inputs=[ft_name, ft_state, ft_long], outputs=[ft_state, ft_sentence, ft_progress, ft_audio, ft_train_md])
 
         def _ft_skip(name, state):
             return _ft_view(name, {"sentences": state.get("sentences", []), "at": int(state.get("at", 0)) + 1})

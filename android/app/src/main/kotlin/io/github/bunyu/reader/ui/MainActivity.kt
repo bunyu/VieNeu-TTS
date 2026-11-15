@@ -76,7 +76,8 @@ enum class Tab { LIBRARY, VOICES, SETTINGS }
 fun displayName(context: android.content.Context, uri: Uri): String =
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }.orEmpty()
 
-fun isVoiceFile(name: String) = name.endsWith(".ovsvoice", true) || name.endsWith(".omnivoice", true)
+fun isVoiceFile(name: String) = name.endsWith(".ovsvoice", true) || name.endsWith(".omnivoice", true) || isPcVoice(name)
+fun isPcVoice(name: String) = name.endsWith(io.github.bunyu.reader.voice.PcVoiceFile.SUFFIX, true)
 
 @Composable
 fun ReaderRoot(incoming: Uri?, consumed: () -> Unit) {

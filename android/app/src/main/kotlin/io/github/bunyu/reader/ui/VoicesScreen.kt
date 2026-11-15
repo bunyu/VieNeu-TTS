@@ -63,6 +63,8 @@ import io.github.bunyu.reader.vieneu.NanoPreset
 import io.github.bunyu.reader.vieneu.ReleaseFile
 import io.github.bunyu.reader.voice.VoiceBundle
 import io.github.bunyu.reader.voice.VoiceBundleException
+import io.github.bunyu.reader.voice.PcVoiceException
+import io.github.bunyu.reader.voice.PcVoiceFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,6 +89,8 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
     val cloned by app.voices.voices.collectAsState()
     /** A recording copied into the cache and waiting for a name: the clip and a suggested name. */
     var pending by remember { mutableStateOf<Pair<File, String>?>(null) }
+    /** Set with [pending] when the file was a voice the Windows app had already enrolled: nothing to learn. */
+    var pendingPrint by remember { mutableStateOf<io.github.bunyu.reader.vieneu.NanoVoice?>(null) }
     var problem by remember { mutableStateOf<Int?>(null) }
     var busy by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
@@ -117,6 +121,7 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
         scope.launch {
             val workspace = File(context.cacheDir, "voice-clone-" + UUID.randomUUID())
             try {
+                pendingPrint = null
                 pending = withContext(Dispatchers.IO) {
                     val name = displayName(context, uri)
                     val extension = name.substringAfterLast('.', "").lowercase().filter { it.isLetterOrDigit() }.take(8)
@@ -127,12 +132,35 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
                             while (true) { val n = input.read(buffer); if (n < 0) break; total += n; if (total > 200L * 1024 * 1024) error("too large"); out.write(buffer, 0, n) }
                         }
                     }
-                    if (isVoiceFile(name)) VoiceBundle.read(copy, File(workspace, "members")).let { it.audio to it.name }
-                    else copy to name.substringBeforeLast('.').take(60)
+                    when {
+                        isPcVoice(name) -> PcVoiceFile.read(copy, File(workspace, "members"), app.vieneu.release.id).let { pc ->
+                            pendingPrint = pc.voice
+                            (pc.sample ?: copy) to pc.name
+                        }
+                        isVoiceFile(name) -> VoiceBundle.read(copy, File(workspace, "members")).let { it.audio to it.name }
+                        else -> copy to name.substringBeforeLast('.').take(60)
+                    }
                 }
             } catch (e: VoiceBundleException) { workspace.deleteRecursively(); problem = R.string.voice_error_format }
+            catch (e: PcVoiceException) {
+                workspace.deleteRecursively()
+                problem = if (e.reason == PcVoiceException.Reason.OTHER_MODEL) R.string.voice_error_pc_model else R.string.voice_error_format
+            }
             catch (e: Exception) { workspace.deleteRecursively(); problem = R.string.voice_error_audio }
             busy = false
+        }
+    }
+
+    /** Keeps a voice the Windows app enrolled; the phone has nothing to learn, so this needs no cloning download. */
+    fun keep(clip: File, name: String, print: io.github.bunyu.reader.vieneu.NanoVoice) {
+        busy = true; problem = null; pending = null; pendingPrint = null
+        app.scope.launch {
+            try {
+                val voice = app.voices.addEnrolled(name, print, clip)
+                app.settings.update { it.copy(voice = VoiceChoice.Cloned(voice.id)) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { problem = R.string.voice_error_format }
+            finally { withContext(Dispatchers.IO) { discard(clip) }; busy = false }
         }
     }
 
@@ -237,16 +265,20 @@ fun VoicesScreen(modifier: Modifier, incoming: Uri?, consumed: () -> Unit, onSet
         }
     }
     pending?.let { (clip, suggested) ->
-        CloneDialog(suggested, onDismiss = { pending = null; scope.launch(Dispatchers.IO) { discard(clip) } }) { name -> clone(clip, name) }
+        val print = pendingPrint
+        CloneDialog(suggested, if (print != null) R.string.voice_add else R.string.voice_clone,
+            onDismiss = { pending = null; pendingPrint = null; scope.launch(Dispatchers.IO) { discard(clip) } }) { name ->
+            if (print != null) keep(clip, name, print) else clone(clip, name)
+        }
     }
 }
 
 @Composable
-private fun CloneDialog(suggested: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+private fun CloneDialog(suggested: String, action: Int, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember { mutableStateOf(suggested) }
     var consent by remember { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.voice_clone)) },
+        title = { Text(stringResource(action)) },
         text = {
             Column {
                 OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.voice_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -256,7 +288,7 @@ private fun CloneDialog(suggested: String, onDismiss: () -> Unit, onConfirm: (St
                 }
             }
         },
-        confirmButton = { TextButton({ onConfirm(name) }, enabled = consent && name.isNotBlank()) { Text(stringResource(R.string.voice_clone)) } },
+        confirmButton = { TextButton({ onConfirm(name) }, enabled = consent && name.isNotBlank()) { Text(stringResource(action)) } },
         dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
 }
 

@@ -140,19 +140,48 @@ def _write(folder: Path, takes: dict) -> None:
     (folder / "metadata.csv").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def save_take(name: str, text: str, audio_path: str) -> float:
-    """File one recorded sentence (a second take of the same sentence replaces the first); returns its seconds."""
+def load_audio(path) -> tuple:
+    """Any recording as mono float32 and its rate: WAV / FLAC / OGG / MP3 directly, phone formats
+    (.m4a, .aac, .amr, .3gp, .opus in other containers) through PyAV."""
+    try:
+        wav, sr = sf.read(str(path), dtype="float32", always_2d=True)
+        return wav.mean(axis=1), sr
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import av
+    except ImportError as e:
+        raise ValueError("Không đọc được file này. Cài thêm gói 'av' (chạy lại setup_windows_gpu.bat) để đọc file ghi âm của điện thoại.") from e
+    try:
+        with av.open(str(path)) as container:
+            stream = next(s for s in container.streams if s.type == "audio")
+            rate = stream.codec_context.sample_rate or 48000
+            resampler = av.AudioResampler(format="flt", layout="mono", rate=rate)
+            chunks = [np.asarray(f.to_ndarray(), np.float32).reshape(-1) for frame in container.decode(stream) for f in resampler.resample(frame)]
+            chunks += [np.asarray(f.to_ndarray(), np.float32).reshape(-1) for f in resampler.resample(None)]
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"Không đọc được file âm thanh này ({e}).") from e
+    if not chunks:
+        raise ValueError("File không có âm thanh.")
+    return np.concatenate(chunks), rate
+
+
+def _trimmed(wav: np.ndarray, sr: int) -> np.ndarray:
+    """The take without the silence before and after it (reaching for the button is not part of the sentence)."""
+    loud = np.flatnonzero(np.abs(wav) > 0.02 * max(float(np.abs(wav).max()), 1e-6))
+    return wav[max(0, loud[0] - sr // 5):loud[-1] + sr // 4] if len(loud) else wav
+
+
+def save_take(name: str, text: str, audio_path: str = None, *, audio: tuple = None) -> float:
+    """File one recorded sentence (a second take of the same sentence replaces the first); returns its seconds.
+    The take is ``audio_path`` (any format ``load_audio`` reads) or ``audio`` = (samples, rate)."""
     text = " ".join((text or "").split())
     if "|" in text or not text:
         raise ValueError("Câu này không dùng được (trống hoặc có ký tự |).")
-    if not audio_path:
-        raise ValueError("Chưa có bản thu. Bấm thu âm, đọc câu, rồi dừng.")
-    wav, sr = sf.read(str(audio_path), dtype="float32", always_2d=True)
-    wav = wav.mean(axis=1)
-    # Trim the silence before and after: reaching for the button is not part of the sentence.
-    loud = np.flatnonzero(np.abs(wav) > 0.02 * max(float(np.abs(wav).max()), 1e-6))
-    if len(loud):
-        wav = wav[max(0, loud[0] - sr // 5):loud[-1] + sr // 4]
+    if audio is None and not audio_path:
+        raise ValueError("Chưa có bản thu. Bấm thu âm (hoặc tải file lên), đọc câu, rồi dừng.")
+    wav, sr = audio if audio is not None else load_audio(audio_path)
+    wav = _trimmed(np.asarray(wav, np.float32), sr)
     seconds = len(wav) / sr
     if seconds < MIN_SECONDS:
         raise ValueError(f"Bản thu chỉ dài {seconds:.1f} giây; cần ít nhất {MIN_SECONDS:.0f} giây. Hãy đọc lại chậm rãi hơn.")
@@ -166,6 +195,65 @@ def save_take(name: str, text: str, audio_path: str) -> float:
     takes[text] = {"file": file, "seconds": round(seconds, 2)}
     _write(folder, takes)
     return seconds
+
+
+def split_reading(wav: np.ndarray, sr: int, gap: float = 0.6) -> List[tuple]:
+    """Where the sentences of one long reading are: stretches of speech separated by at least ``gap``
+    seconds of quiet, as sample ranges. Pauses at commas are shorter and stay inside a sentence."""
+    hop = max(1, sr // 100)                          # 10 ms
+    count = len(wav) // hop
+    if count == 0:
+        return []
+    energy = np.sqrt(np.mean(wav[:count * hop].reshape(count, hop) ** 2, axis=1) + 1e-12)
+    # Quiet means well below the loud parts of this recording: phone recordings carry a noise floor.
+    floor = max(np.percentile(energy, 95) * 10 ** (-30 / 20), np.percentile(energy, 10) * 2)
+    loud = energy > floor
+    runs, start, quiet = [], None, 0
+    for i, on in enumerate(loud):
+        if on:
+            if start is None:
+                start = i
+            quiet = 0
+        elif start is not None:
+            quiet += 1
+            if quiet * hop >= gap * sr:
+                runs.append((start, i - quiet + 1))
+                start, quiet = None, 0
+    if start is not None:
+        runs.append((start, count - quiet))
+    # A click or a breath is not a sentence.
+    return [(a * hop, b * hop) for a, b in runs if (b - a) * hop >= 0.5 * sr]
+
+
+def import_reading(name: str, sentences: List[str], audio_path: str) -> tuple:
+    """One recording of ``sentences`` read in order, a pause of about a second after each, filed as one
+    take per sentence. Returns (takes saved, minutes, skipped take numbers). Nothing is saved when the pieces and the sentences
+    do not line up: a take filed under the wrong text would teach the model wrong speech. Takes that line
+    up but fall outside 3–15 seconds are left out; their numbers are the third value returned."""
+    wav, sr = load_audio(audio_path)
+    pieces = split_reading(wav, sr)
+    if not pieces:
+        raise ValueError("Không tìm thấy giọng nói trong bản thu.")
+    if len(pieces) > len(sentences):
+        raise ValueError(f"Bản thu có {len(pieces)} đoạn nói nhưng chỉ còn {len(sentences)} câu trong danh sách. "
+                         "Có thể bạn đã ngừng giữa câu quá lâu; hãy ngừng ngắn hơn trong câu và khoảng một giây giữa các câu.")
+    pairs = list(zip(sentences, pieces))
+    # Each Vietnamese syllable takes roughly the same time, so the speaking rate must stay steady from
+    # one take to the next; a take holding two sentences, or half of one, falls far off it.
+    rates = [len(text.split()) / ((b - a) / sr) for text, (a, b) in pairs]
+    median = float(np.median(rates))
+    for n, ((text, (a, b)), rate) in enumerate(zip(pairs, rates), 1):
+        if not (0.7 * median <= rate <= 1.45 * median):
+            raise ValueError(f"Đoạn {n} (giây {a / sr:.0f}–{b / sr:.0f}, dài {(b - a) / sr:.1f} giây) không khớp với câu “{text[:60]}…”. "
+                             "Chưa lưu gì. Hãy đọc đúng thứ tự, ngừng khoảng một giây sau mỗi câu, hoặc thu lại từ câu đó.")
+    total, saved, skipped = 0.0, 0, []
+    for n, (text, (a, b)) in enumerate(pairs, 1):
+        try:
+            total += save_take(name, text, audio=(wav[max(0, a - sr // 10):b + sr // 5], sr))
+            saved += 1
+        except ValueError:
+            skipped.append(n)   # in line with its sentence, but too short or too long to train on
+    return saved, total / 60, skipped
 
 
 def progress(name: str) -> tuple:

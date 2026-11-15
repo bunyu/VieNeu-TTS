@@ -19,6 +19,8 @@ uv sync --frozen || goto :fail
 echo [+] Installing PyTorch 2.8 for CUDA ...
 uv pip install --python .venv\Scripts\python.exe "torch==2.8.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/%CUDA_WHEELS% || goto :fail
 uv pip install --python .venv\Scripts\python.exe "transformers==4.57.6" safetensors hf_xet || goto :fail
+rem PyAV decodes phone recordings (.m4a, .aac, .amr...) for the fine-tune tab; it carries its own ffmpeg.
+uv pip install --python .venv\Scripts\python.exe av || goto :fail
 
 .venv\Scripts\python.exe -c "import torch; print('[+] GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none - will run on the CPU')"
 echo [+] Done. Start the app with run_windows.bat

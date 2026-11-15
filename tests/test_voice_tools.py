@@ -57,3 +57,42 @@ def test_takes_are_filed_with_their_text(tmp_path, monkeypatch):
         ft.save_take("Giong toi", "Câu quá ngắn.", str(short))
     with pytest.raises(ValueError):
         ft.safe_name("  ")
+
+
+def test_a_long_reading_is_cut_into_its_sentences(tmp_path, monkeypatch):
+    monkeypatch.setattr(ft, "DATASETS", tmp_path)
+    sr = 16000
+    rng = np.random.default_rng(1)
+    noise = lambda seconds: (0.003 * rng.normal(size=int(seconds * sr))).astype(np.float32)   # a phone's noise floor
+    sentences = ["Một hai ba bốn năm sáu bảy tám chín mười.", "Mười một mười hai mười ba mười bốn mười lăm mười sáu.",
+                 "Hai mươi mốt hai mươi hai hai mươi ba.", "Câu này không được đọc."]
+    # About 3 syllables a second; a short comma pause inside the second sentence must not split it.
+    reading = [noise(1), speech(3.4), noise(1.1), speech(2.0), noise(0.3), speech(2.0), noise(1.0), speech(2.3), noise(1.5)]
+    take = tmp_path / "phone.wav"
+    sf.write(take, np.concatenate(reading) + noise(sum(len(r) for r in reading) / sr), sr)
+    count, minutes, skipped = ft.import_reading("Giong toi", sentences, str(take))
+    # The third sentence lines up but lasts under three seconds: left out and reported, not a failure.
+    assert (count, skipped) == (2, [3]) and 0.12 < minutes < 0.16
+    assert ft.progress("Giong toi")[2] == set(sentences[:2])
+    # Forgetting the pause between two sentences joins them: the rate is off, and nothing is saved.
+    # (Sentences two and three read as one stretch, then sentence four taken for sentence three.)
+    sf.write(take, np.concatenate([noise(1), speech(3.4), noise(1.1), speech(6.4), noise(1), speech(1.7), noise(1)]), sr)
+    with pytest.raises(ValueError, match="không khớp"):
+        ft.import_reading("Giong khac", sentences, str(take))
+    assert ft.progress("Giong khac")[0] == 0
+
+
+def test_phone_formats_are_read(tmp_path):
+    av = pytest.importorskip("av")
+    sr = 48000
+    path = tmp_path / "phone.m4a"
+    with av.open(str(path), "w") as out:
+        stream = out.add_stream("aac", rate=sr, layout="mono")
+        frame = av.AudioFrame.from_ndarray(speech(2, sr)[None, :], format="flt", layout="mono")
+        frame.sample_rate = sr
+        for packet in stream.encode(frame):
+            out.mux(packet)
+        for packet in stream.encode(None):
+            out.mux(packet)
+    wav, rate = ft.load_audio(path)
+    assert rate == sr and 1.9 < len(wav) / sr < 2.2 and np.abs(wav).max() > 0.1

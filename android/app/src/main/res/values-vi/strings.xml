@@ -77,7 +77,7 @@
     <string name="fast_mode">Tạo giọng nhanh hơn</string>
     <string name="fast_mode_hint">Nhanh gấp khoảng hai lần, âm thanh hơi thô hơn. Dùng khi việc đọc bị khựng.</string>
     <string name="voices_your">Giọng của bạn</string>
-    <string name="voices_clone_how">Thu âm bạn đọc một đoạn văn ngắn, hoặc chọn một đoạn thu sạch của một người nói (10 đến 30 giây, không nhạc nền hay tiếng ồn). Giọng xuất từ VoiceStudio (.ovsvoice) cũng dùng được.</string>
+    <string name="voices_clone_how">Thu âm bạn đọc một đoạn văn ngắn, hoặc chọn một đoạn thu sạch của một người nói (10 đến 30 giây, không nhạc nền hay tiếng ồn). Giọng tạo trong app Windows (.dtvoice, ở mục “Dùng giọng trên app điện thoại”) hoặc xuất từ VoiceStudio (.ovsvoice) cũng dùng được: chọn “Từ tệp”.</string>
     <string name="voice_clone">Nhân bản giọng</string>
     <string name="voice_clone_download">Lần đầu nhân bản cần tải thêm %1$d MB.</string>
     <string name="voice_name">Tên</string>
@@ -168,4 +168,6 @@
     <string name="language">Ngôn ngữ</string>
     <string name="language_phone">Theo điện thoại</string>
     <string name="app_theme">Sáng hoặc tối</string>
+    <string name="voice_add">Thêm giọng</string>
+    <string name="voice_error_pc_model">Giọng này được tạo cho một phiên bản khác của model điện thoại. Hãy tạo lại bằng app Windows mới nhất.</string>
 </resources>
